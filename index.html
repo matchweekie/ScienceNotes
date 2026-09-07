@@ -47,13 +47,22 @@
     <h2>OPERATION RIVER CROSSING</h2>
     <div class="row">
       <button class="btn" onclick="go('river.html')">SINGLE PLAYER · EASY</button>
-      <button class="btn alt" onclick="go('river.html?normal')">SQUAD · NORMAL</button>
     </div>
+    <div class="row">
+      <button class="btn alt" onclick="createRoom()">CREATE A ROOM</button>
+      <button class="btn alt" onclick="joinRoom()">JOIN A ROOM</button>
+    </div>
+    <div id="joinBox" class="hidden">
+      <label>ROOM CODE</label>
+      <input id="code" maxlength="6" placeholder="e.g. KX4Q" style="text-transform:uppercase; letter-spacing:.3em; font-size:22px; text-align:center">
+      <div class="row" style="margin-top:10px"><button class="btn alt" onclick="joinGo()">JOIN</button></div>
+    </div>
+    <p class="dim">Rooms are squad difficulty, up to 10 players. Whoever's first in runs the bots.<br>Everyone needs to be signed in on this page first.</p>
     <h2>CLASSIC — AIRFIELD SANDBOX</h2>
     <div class="row">
       <button class="btn ghost" onclick="go('classic.html')">SINGLE PLAYER</button>
     </div>
-    <p class="dim">Multiplayer rooms coming — same buttons, plus a room code.<br>Low graphics for Chromebooks is a checkbox on the game's start screen.</p>
+    <p class="dim">Low graphics for Chromebooks is a checkbox on the game's start screen.</p>
   </div>
 </div>
 <script>
@@ -76,6 +85,14 @@
   $('name').addEventListener('keydown', e => { if (e.key === 'Enter') $('next').click(); });
   $('change').addEventListener('click', e => { e.preventDefault(); $('menu').classList.add('hidden'); $('login').classList.remove('hidden'); $('email').value = user.email; $('step2').classList.remove('hidden'); $('name').value = user.name; $('next').textContent = 'PLAY'; });
   function go(url) { location.href = url; }
+  function createRoom() {
+    const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'; let c = '';
+    for (let i = 0; i < 4; i++) c += chars[Math.floor(Math.random() * chars.length)];
+    go('river.html?normal&room=' + c);
+  }
+  function joinRoom() { $('joinBox').classList.remove('hidden'); $('code').focus(); }
+  function joinGo() { const c = $('code').value.trim().toUpperCase().replace(/[^A-Z0-9]/g, ''); if (c.length < 3) return; go('river.html?normal&room=' + c); }
+  $('code').addEventListener('keydown', e => { if (e.key === 'Enter') joinGo(); });
 </script>
 </body>
 </html>
