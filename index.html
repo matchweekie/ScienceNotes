@@ -1,0 +1,81 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Jet Strike</title>
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; }
+  html,body { height:100%; background:radial-gradient(ellipse at center, #10263c, #05090e); color:#f4f6f2; font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; }
+  .wrap { min-height:100%; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:22px; padding:30px; text-align:center; }
+  h1 { font-family:"Arial Black","Helvetica Neue",Arial,sans-serif; font-size:64px; letter-spacing:.14em; }
+  h2 { font-size:15px; color:#8fb8d4; letter-spacing:.2em; font-weight:400; }
+  .card { background:rgba(255,255,255,.05); border:1px solid rgba(255,255,255,.12); border-radius:10px; padding:26px 30px; width:min(560px, 92vw); display:flex; flex-direction:column; gap:14px; }
+  label { font-size:12px; color:#8fb8d4; letter-spacing:.16em; text-align:left; }
+  input { width:100%; padding:13px 14px; font:inherit; font-size:16px; color:#f4f6f2; background:#0b1522; border:1px solid rgba(255,255,255,.2); border-radius:6px; }
+  input:focus { outline:2px solid #3ddc84; }
+  .btn { cursor:pointer; padding:15px 24px; font:inherit; font-size:15px; letter-spacing:.14em; color:#04121a; background:#3ddc84; border:0; border-radius:6px; font-weight:700; }
+  .btn:hover { background:#8ff0a4; }
+  .btn.alt { background:#5fd1ff; }
+  .btn.ghost { background:transparent; color:#8fb8d4; border:1px solid rgba(255,255,255,.2); }
+  .row { display:flex; gap:12px; flex-wrap:wrap; }
+  .row .btn { flex:1; }
+  .who { font-size:14px; color:#8ff0a4; letter-spacing:.1em; }
+  .dim { font-size:12px; color:#5a7f99; line-height:1.8; }
+  .hidden { display:none; }
+  .err { color:#ff6b6b; font-size:13px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>JET STRIKE</h1>
+
+  <div class="card" id="login">
+    <h2>SIGN IN TO PLAY</h2>
+    <label>EMAIL</label>
+    <input id="email" type="email" placeholder="you@school.ie" autocomplete="email">
+    <div id="step2" class="hidden">
+      <label>USERNAME — this is what shows above your head</label>
+      <input id="name" type="text" maxlength="14" placeholder="e.g. Maverick" autocomplete="off">
+    </div>
+    <div class="err" id="err"></div>
+    <button class="btn" id="next">NEXT</button>
+  </div>
+
+  <div class="card hidden" id="menu">
+    <div class="who">PLAYING AS <span id="whoName"></span> · <a href="#" id="change" style="color:#8fb8d4">change</a></div>
+    <h2>OPERATION RIVER CROSSING</h2>
+    <div class="row">
+      <button class="btn" onclick="go('river.html')">SINGLE PLAYER · EASY</button>
+      <button class="btn alt" onclick="go('river.html?normal')">SQUAD · NORMAL</button>
+    </div>
+    <h2>CLASSIC — AIRFIELD SANDBOX</h2>
+    <div class="row">
+      <button class="btn ghost" onclick="go('classic.html')">SINGLE PLAYER</button>
+    </div>
+    <p class="dim">Multiplayer rooms coming — same buttons, plus a room code.<br>Low graphics for Chromebooks is a checkbox on the game's start screen.</p>
+  </div>
+</div>
+<script>
+  const $ = id => document.getElementById(id);
+  let user = null;
+  try { user = JSON.parse(localStorage.getItem('jetstrike-user') || 'null'); } catch (e) {}
+  function showMenu() { $('login').classList.add('hidden'); $('menu').classList.remove('hidden'); $('whoName').textContent = user.name; }
+  if (user && user.name && user.email) showMenu();
+  $('next').addEventListener('click', () => {
+    const email = $('email').value.trim();
+    if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) { $('err').textContent = 'That doesn\'t look like an email.'; return; }
+    if ($('step2').classList.contains('hidden')) { $('step2').classList.remove('hidden'); $('err').textContent = ''; $('name').focus(); $('next').textContent = 'PLAY'; return; }
+    const name = $('name').value.trim().replace(/[^\w\- ]/g, '');
+    if (name.length < 2) { $('err').textContent = 'Pick a username, 2–14 characters.'; return; }
+    user = { email, name, created: Date.now() };
+    try { localStorage.setItem('jetstrike-user', JSON.stringify(user)); } catch (e) {}
+    showMenu();
+  });
+  $('email').addEventListener('keydown', e => { if (e.key === 'Enter') $('next').click(); });
+  $('name').addEventListener('keydown', e => { if (e.key === 'Enter') $('next').click(); });
+  $('change').addEventListener('click', e => { e.preventDefault(); $('menu').classList.add('hidden'); $('login').classList.remove('hidden'); $('email').value = user.email; $('step2').classList.remove('hidden'); $('name').value = user.name; $('next').textContent = 'PLAY'; });
+  function go(url) { location.href = url; }
+</script>
+</body>
+</html>
