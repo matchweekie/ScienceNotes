@@ -20,6 +20,8 @@
 
   /* left stack: speed + throttle */
   #left{left:26px;top:50%;transform:translateY(-50%);width:118px;padding:10px 12px}
+  #mute{position:absolute;right:26px;bottom:250px;padding:8px 12px;font-size:11px;letter-spacing:.16em;color:#7fd4a8;cursor:pointer;pointer-events:auto;user-select:none}
+  #mute.off{color:#c07070}
   #spd{font-size:34px;font-weight:700;line-height:1;color:#8ff0b8}
   #alt{font-size:26px;font-weight:700;line-height:1;color:#8ff0b8;margin-top:14px}
   .sub{font-size:10px;letter-spacing:.16em;color:#4d8f71}
@@ -40,8 +42,11 @@
   #obj{position:absolute;top:16px;left:50%;transform:translateX(-50%);text-align:center;min-width:340px;padding:9px 22px}
   #objTitle{font-size:15px;letter-spacing:.2em;font-weight:700;color:#f6ffe9}
   #objSub{font-size:12px;color:#7fd4a8;margin-top:3px;letter-spacing:.08em}
-  #clock{position:absolute;top:18px;left:26px;padding:8px 14px;font-size:24px;font-weight:700;color:#8ff0b8}
-  #clock small{display:block;font-size:9px;letter-spacing:.22em;color:#5fbf92;font-weight:400}
+  /* wing mirror lives in the top-left corner; the 3D view is drawn into it by the renderer */
+  #mirror{position:absolute;left:20px;top:20px;width:240px;height:130px;border:1px solid rgba(120,255,190,.28);border-radius:4px;
+          box-shadow:0 0 0 3px rgba(4,10,8,.55), inset 0 0 24px rgba(0,0,0,.45);background:transparent}
+  #mirror::after{content:"REAR";position:absolute;left:8px;bottom:5px;font-size:9px;letter-spacing:.24em;color:rgba(160,255,205,.75);text-shadow:0 1px 3px #000}
+  #mirror i{position:absolute;left:0;right:0;top:50%;height:1px;background:rgba(120,255,190,.10)}
   #score{position:absolute;top:18px;right:26px;padding:8px 14px;text-align:right;font-size:24px;font-weight:700;color:#ffd98a}
   #score small{display:block;font-size:9px;letter-spacing:.22em;color:#b9954f;font-weight:400}
 
@@ -88,8 +93,9 @@
 <body>
 <div id="hud">
   <canvas id="tac"></canvas>
-  <div class="panel" id="clock"><small>TIME</small><span id="clockVal" class="mono">0:00</span></div>
+  <div id="mirror"><i></i></div>
   <div class="panel" id="score"><small>SCORE</small><span id="scoreVal" class="mono">0</span></div>
+  <div class="panel" id="mute">SOUND ON · M</div>
   <div class="panel" id="obj"><div id="objTitle">—</div><div id="objSub">—</div></div>
   <div class="panel" id="left">
     <span class="lbl">KNOTS</span><div id="spd" class="mono">0</div>
@@ -97,12 +103,9 @@
     <div id="thrWrap"><i id="thr"></i></div>
   </div>
   <div class="panel" id="right">
-    <span class="lbl">STORES</span>
-    <div class="wep" id="w0"><span>1 MISSILE</span><b>—</b></div>
-    <div class="wep" id="w1"><span>2 ROCKET</span><b>—</b></div>
-    <div class="wep" id="w2"><span>3 BOMB</span><b>—</b></div>
-    <div class="wep" id="w3"><span>GUN</span><b>—</b></div>
-    <div id="flares">FLARES <b id="flareN">0</b></div>
+    <span class="lbl">ROCKETS</span>
+    <div id="rktN" class="mono" style="font-size:44px;font-weight:700;color:#8ff0b8;line-height:1">10</div>
+    <div id="rktState" style="font-size:11px;letter-spacing:.16em;color:#7fd4a8;margin-top:4px;min-height:14px">READY</div>
   </div>
   <div class="panel" id="hpWrap"><span class="lbl">AIRFRAME</span><div id="hpBar"><i></i></div><div id="gearTxt"></div></div>
   <div class="panel" id="mapWrap"><canvas id="map" width="380" height="380"></canvas><div id="mapLbl">TAC MAP</div></div>
@@ -121,8 +124,7 @@
     <div class="keys">
       <b>W / S</b><span>pitch up / down</span><b>A / D</b><span>turn</span>
       <b>SHIFT</b><span>throttle up</span><b>CTRL</b><span>throttle down</span>
-      <b>F</b><span>fire selected weapon</span><b>SPACE</b><span>guns</span>
-      <b>1 2 3</b><span>missile / rocket / bomb</span><b>R</b><span>flares</span>
+      <b>F / SPACE</b><span>fire the rocket</span><b>M</b><span>sound on / off</span>
       <b>G</b><span>landing gear</span><b>C</b><span>cockpit / chase</span>
       <b>E</b><span>load / drop cargo</span><b>P</b><span>pause</span>
     </div>
@@ -176,22 +178,20 @@ const SKILL   = (Q.get('skill') || 'easy').toLowerCase();          // easy | nor
 const EASY    = SKILL !== 'normal';
 
 const CFG = {
-  jetScale: 2.4, enemyScale: 2.8,
+  jetScale: 2.4, enemyScale: 4.6, banditScale: 3.8,
   speedMin: 70, speedMax: 300, speedStart: 145, throttleRate: 95,
   pitchRate: 1.25, turnRate: 0.95, turnRamp: 0.45, leanAngle: 0.45, leanSpeed: 3.0, sinkRate: 0.032,
   ceiling: 2600,
-  // the campaign's missile, unchanged
-  missileSpeed: 800, missileTurn: 2.2, assistCone: 0.96, assistRange: 1900, missileLife: 9, missileMax: 10, reloadTime: 4.5,
+  // one weapon: an unguided rocket that goes where the nose is pointing
+  rocketSpeed: 620, rocketLife: 7, rocketMax: 10, reloadTime: 4.5,
+  rocketDrop: 3.2,                     // how far below the nose it comes out
   blastRadius: 62, blastDamage: 260,
   // the campaign's AA gun, unchanged
-  aaRange: 780, aaCooldown: 1.7, aaBulletSpeed: 400, aaDamage: 9, playerHitR: 20,
-  gunRange: 1500, gunDps: 62, gunSpread: 0.010, gunRpm: 0.055, gunAmmo: 900,
-  rktSpeed: 700, rktLife: 5.5, bombDrag: 0.14,
-  flareCount: 10,
+  aaRange: 780, aaCooldown: 1.7, aaBulletSpeed: 400, aaDamage: 9, playerHitR: 24,
 };
 const DIFF = EASY
-  ? { aceSkill: 0.55, blueHp: 1.5, bandits: 0.7, guns: 0.75 }
-  : { aceSkill: 0.85, blueHp: 1.0, bandits: 1.0, guns: 1.0 };
+  ? { aceSkill: 0.55, blueHp: 1.5, bandits: 0.7 }
+  : { aceSkill: 0.85, blueHp: 1.0, bandits: 1.0 };
 
 const TAU = Math.PI * 2;
 const clamp = (v, a, b) => v < a ? a : v > b ? b : v;
@@ -218,16 +218,21 @@ addEventListener('keydown', e => {
   if (k === 'p') togglePause();
   if (k === 'c') toggleCamera();
   if (k === 'g') toggleGear();
-  if (k === 'r') popFlares();
   if (k === 'e') cargoAction();
-  if (k === 'm') { muted = !muted; showMsg(muted ? 'SOUND OFF' : 'SOUND ON', 1); }
-  if (k >= '1' && k <= '3') selectWeapon(+k - 1);
+  if (k === 'm') toggleMute();
 });
 addEventListener('keyup', e => { keys[e.key.toLowerCase()] = false; });
 addEventListener('blur', () => { for (const k in keys) keys[k] = false; });
 
 /* ---- audio ---- */
 let actx = null, muted = false;
+try { muted = localStorage.getItem('jetstrike-mute') === '1'; } catch (e) {}
+function toggleMute() {
+  muted = !muted;
+  try { localStorage.setItem('jetstrike-mute', muted ? '1' : '0'); } catch (e) {}
+  updateMuteUI();
+  if (!muted) beep(760, 0.12, 'sine', 0.06, 1.3);
+}
 const audio = () => { if (!actx) { try { actx = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) {} } return actx; };
 function beep(freq, dur, type = 'square', vol = 0.08, slide = 0) {
   if (muted) return; const a = audio(); if (!a) return;
@@ -237,12 +242,28 @@ function beep(freq, dur, type = 'square', vol = 0.08, slide = 0) {
   g.gain.value = vol; g.gain.exponentialRampToValueAtTime(0.0001, a.currentTime + dur);
   o.connect(g); g.connect(a.destination); o.start(); o.stop(a.currentTime + dur);
 }
-function noiseBurst(dur = 0.4, vol = 0.16) {
+function noiseBurst(dur = 0.4, vol = 0.16, cutoff = 0) {
   if (muted) return; const a = audio(); if (!a) return;
   const n = Math.floor(a.sampleRate * dur), buf = a.createBuffer(1, n, a.sampleRate), d = buf.getChannelData(0);
   for (let i = 0; i < n; i++) d[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / n, 2);
   const src = a.createBufferSource(), g = a.createGain();
-  src.buffer = buf; g.gain.value = vol; src.connect(g); g.connect(a.destination); src.start();
+  src.buffer = buf; g.gain.value = vol;
+  if (cutoff) { const f = a.createBiquadFilter(); f.type = 'lowpass'; f.frequency.value = cutoff; src.connect(f); f.connect(g); }
+  else src.connect(g);
+  g.connect(a.destination); src.start();
+}
+/* ---- the two sounds that matter ---- */
+function sndRocket() {                       // motor lighting up and running away from you
+  if (muted) return; const a = audio(); if (!a) return;
+  noiseBurst(1.1, 0.30, 2600);
+  beep(300, 0.9, 'sawtooth', 0.13, 0.22);
+  beep(120, 0.9, 'square', 0.07, 0.35);
+}
+function sndBoom(big = true) {               // the hit
+  if (muted) return;
+  noiseBurst(big ? 1.5 : 0.7, big ? 0.42 : 0.24, big ? 900 : 1600);
+  beep(70, big ? 1.0 : 0.5, 'square', big ? 0.18 : 0.1, 0.28);
+  beep(150, big ? 0.55 : 0.3, 'sine', 0.11, 0.24);
 }
 
 /* ---- renderer / scene ---- */
@@ -1504,13 +1525,13 @@ const CHASE_TILT = new THREE.Quaternion().setFromAxisAngle(AX, -0.055);
 function newCraft(team) {
   const root = new THREE.Group();
   const model = makeJetModel(team);
-  model.scale.setScalar(CFG.jetScale);
+  model.scale.setScalar(team === 'red' ? CFG.banditScale : CFG.jetScale);
   root.add(model); scene.add(root);
   return {
     kind: 'plane', root, model, pos: root.position, team,
     speed: CFG.speedStart, pitchS: 0, turnS: 0, airborne: true, gear: false,
-    hp: HP.plane, maxHp: HP.plane, alive: true, exFlame: 0, exSmoke: 0, hitR: 15,
-    missiles: CFG.missileMax, reloading: 0, vel: new THREE.Vector3(),
+    hp: HP.plane, maxHp: HP.plane, alive: true, exFlame: 0, exSmoke: 0,
+    hitR: team === 'red' ? 24 : 15, reloading: 0, vel: new THREE.Vector3(),
   };
 }
 function setGear(c, on) { c.gear = on; c.model.userData.gear.visible = on; }
@@ -1614,6 +1635,17 @@ function flyAI(c, dt, wantDir, wantSpeed) {
   exhaust(c, dt, c.speed > 240, false);
 }
 
+/* ---- the wing mirror: a rear view, always on ---- */
+const mirrorCam = new THREE.PerspectiveCamera(72, 2, 0.6, 9000);
+function updateMirrorCam() {
+  const c = P.craft; if (!c) return;
+  _v.set(0, 7, -11).applyQuaternion(c.root.quaternion).add(c.pos);
+  mirrorCam.position.copy(_v);
+  _q.copy(c.root.quaternion).multiply(MIRROR_TURN);
+  mirrorCam.quaternion.copy(_q);
+}
+const MIRROR_TURN = new THREE.Quaternion().setFromAxisAngle(WORLD_UP, Math.PI);
+
 /* ---- camera ---- */
 function toggleCamera() { G.cockpit = !G.cockpit; applyCamMode(); }
 function applyCamMode() {
@@ -1659,25 +1691,27 @@ const G = {
 };
 const P = {
   craft: null, alive: true, lives: 3, respawn: 0,
-  weapon: 0, ammo: [0, 0, 0], gunAmmo: CFG.gunAmmo, flares: CFG.flareCount,
-  gunCd: 0, fireCd: 0, cargo: 0, atBase: null, lock: null, lockT: 0,
+  rockets: CFG.rocketMax, fireCd: 0, cargo: 0, atBase: null,
 };
-const WEP = ['MISSILE', 'ROCKET', 'BOMB'];
 
-const vehicles = [], planes = [], missiles = [], shells = [], aaBullets = [], bombs = [], flares = [], drops = [];
+const vehicles = [], planes = [], rockets = [], aaBullets = [], drops = [];
 
 /* ============================================================
-   GROUND VEHICLES — the campaign's, with its AA guns
+   GROUND VEHICLES — the campaign's, scaled up so you can see them
    ============================================================ */
 const HP = { plane: 100, tank: 110, truck: 60, aa: 80, radar: 60, fuel: 90, boat: 220 };
 const VNAME = { tank: 'TANK', truck: 'TRUCK', aa: 'AA GUN', radar: 'RADAR', fuel: 'FUEL DEPOT', boat: 'PATROL BOAT' };
 const VSCORE = { tank: 220, truck: 110, aa: 320, radar: 300, fuel: 340, boat: 480 };
+const VHITR = { tank: 26, truck: 22, aa: 26, radar: 24, fuel: 30, boat: 36 };
 
 function makeVehicle(kind, x, z, yaw = 0, opts = {}) {
   const model = kind === 'tank' ? makeTankModel('red') : kind === 'truck' ? makeTruckModel('red')
     : kind === 'aa' ? makeAAModel('red') : kind === 'radar' ? makeRadarModel()
     : kind === 'fuel' ? makeFuelModel() : makeBoatModel();
   if (kind === 'tank' || kind === 'truck' || kind === 'aa') model.scale.setScalar(CFG.enemyScale);
+  else if (kind === 'radar') model.scale.setScalar(2.0);
+  else if (kind === 'fuel') model.scale.setScalar(1.6);
+  else if (kind === 'boat') model.scale.setScalar(1.5);
   model.traverse(o => { if (o.isMesh) { o.castShadow = !LOW; o.receiveShadow = !LOW; } });
   const root = new THREE.Object3D(); root.add(model);
   const y = opts.y != null ? opts.y : groundAt(x, z);
@@ -1685,49 +1719,40 @@ function makeVehicle(kind, x, z, yaw = 0, opts = {}) {
   scene.add(root);
   const v = {
     kind, team: 'red', root, model, pos: root.position,
-    hp: HP[kind], maxHp: HP[kind], alive: true,
-    hitR: kind === 'truck' ? 13 : kind === 'boat' ? 30 : kind === 'fuel' ? 18 : 16,
+    hp: HP[kind], maxHp: HP[kind], alive: true, hitR: VHITR[kind],
     turret: model.userData.turret || null, dish: model.userData.dish || null,
-    cooldown: rand(0.5, 2), fireCd: rand(1, 3), wp: null, wpTimer: 0,
+    cooldown: rand(0.5, 2), wp: null, wpTimer: 0,
     moveSpeed: kind === 'truck' ? 34 : kind === 'tank' ? 22 : 0,
     turnSpeed: kind === 'truck' ? 1.6 : 1.0,
     home: new THREE.Vector3(x, 0, z), patrol: opts.patrol || null, t: rand(0, 100),
-    primary: opts.primary !== false, mobile: kind === 'tank' || kind === 'truck' || kind === 'boat',
+    mobile: kind === 'tank' || kind === 'truck' || kind === 'boat',
   };
-  if (kind === 'fuel') buildings.push({ x, z, hw: 24, hd: 24, top: y + 12, type: 'fuel', ruin: false });
+  if (kind === 'fuel') buildings.push({ x, z, hw: 34, hd: 34, top: y + 18, type: 'fuel', ruin: false });
   vehicles.push(v);
   return v;
-}
-function wreckVehicle(v) {
-  v.model.traverse(o => { if (o.isMesh) o.material = WRECK_MAT; });
-  v.model.scale.y *= 0.78;
-  v.root.rotation.z += rand(-0.22, 0.22); v.root.rotation.x += rand(-0.12, 0.12);
-  burnAt(_v.copy(v.pos).add(_v2.set(rand(-3, 3), 4, rand(-3, 3))), 35);
 }
 function damageVehicle(v, amount, at) {
   if (!v.alive) return;
   v.hp -= amount;
-  if (v.hp > 0) { puff(at || v.pos, 1.6, 0xffb46b, 0.35, 4); return; }
+  if (v.hp > 0) { puff(at || v.pos, 2.2, 0xffb46b, 0.35, 4); return; }
   v.hp = 0; v.alive = false;
-  explode(v.pos, v.kind === 'fuel' ? 3.2 : 1.4, true); noiseBurst(0.6, 0.2);
-  wreckVehicle(v);
+  explode(v.pos, v.kind === 'fuel' ? 4.2 : 2.2, true);
+  v.model.traverse(o => { if (o.isMesh) o.material = WRECK_MAT; });
+  v.model.scale.y *= 0.78;
+  v.root.rotation.z += rand(-0.22, 0.22); v.root.rotation.x += rand(-0.12, 0.12);
+  burnAt(_v.copy(v.pos).add(_v2.set(rand(-4, 4), 6, rand(-4, 4))), 35);
   G.stats.ground++; addScore(VSCORE[v.kind] || 150);
   onTargetDown(v);
 }
-function splash(pos, radius, amount) {
-  for (const v of vehicles) { if (!v.alive) continue; const d = v.pos.distanceTo(pos); if (d < radius + v.hitR * 0.5) damageVehicle(v, amount * (1 - Math.max(0, d - v.hitR * 0.5) / radius) + 10, v.pos); }
-  for (const b of planes) { if (!b.craft.alive) continue; const d = b.craft.pos.distanceTo(pos); if (d < radius) { b.craft.hp -= amount * (1 - d / radius); if (b.craft.hp <= 0) killBandit(b); } }
-  if (P.alive && P.craft.pos.distanceTo(pos) < radius * 0.8) hurtPlayer(30, 'BLAST');
-}
 
-/* ---- ground movement: patrols and convoys ---- */
+/* ---- ground movement ---- */
 function pickWaypoint(v) {
   for (let i = 0; i < 24; i++) {
     const a = rand(0, TAU), r = rand(90, 320);
     const x = clamp(v.home.x + Math.cos(a) * r, M.x0 + 120, M.x1 - 120);
     const z = clamp(v.home.z + Math.sin(a) * r, M.z0 + 160, M.z1 - 160);
     if (v.kind === 'boat') { if (overWater(x, z)) return new THREE.Vector3(x, 0, z); continue; }
-    if (nearestTree(x, z, 12) || overWater(x, z) || buildingHit(_v.set(x, terrainH(x, z) + 3, z), 10)) continue;
+    if (nearestTree(x, z, 16) || overWater(x, z) || buildingHit(_v.set(x, terrainH(x, z) + 3, z), 14)) continue;
     return new THREE.Vector3(x, 0, z);
   }
   return null;
@@ -1735,21 +1760,29 @@ function pickWaypoint(v) {
 function driveVehicle(v, dt) {
   if (!v.mobile) return;
   v.wpTimer -= dt;
-  if (!v.wp || v.wpTimer <= 0 || v.pos.distanceTo(v.wp) < 26) { v.wp = pickWaypoint(v); v.wpTimer = rand(9, 18); }
+  if (!v.wp || v.wpTimer <= 0 || v.pos.distanceTo(v.wp) < 30) { v.wp = pickWaypoint(v); v.wpTimer = rand(9, 18); }
   if (!v.wp) return;
   const want = Math.atan2(-(v.wp.x - v.pos.x), -(v.wp.z - v.pos.z));
-  let diff = Math.atan2(Math.sin(want - v.root.rotation.y), Math.cos(want - v.root.rotation.y));
+  const diff = Math.atan2(Math.sin(want - v.root.rotation.y), Math.cos(want - v.root.rotation.y));
   v.root.rotation.y += clamp(diff, -v.turnSpeed * dt, v.turnSpeed * dt);
   const sp = v.moveSpeed * (Math.abs(diff) > 0.9 ? 0.35 : 1);
   const f = _v.set(-Math.sin(v.root.rotation.y), 0, -Math.cos(v.root.rotation.y));
   v.pos.addScaledVector(f, sp * dt);
-  if (v.kind === 'boat') { v.pos.y = MAP.seaY != null ? MAP.seaY + 1 : 1; }
-  else { resolveGround(v.pos, 12, 8); v.pos.y = terrainH(v.pos.x, v.pos.z); }
+  if (v.kind === 'boat') v.pos.y = MAP.seaY != null ? MAP.seaY + 1 : 1;
+  else { resolveGround(v.pos, 16, 10); v.pos.y = terrainH(v.pos.x, v.pos.z); }
 }
 
-/* ---- AA GUNS: they see you, they track you, they hose tracer at you ---- */
-const bulletG = new THREE.SphereGeometry(0.55, 6, 5);
+/* ---- AA GUNS: tracer you can see coming ---- */
+const bulletG = new THREE.SphereGeometry(0.8, 6, 5);
 const aaBulletM = new THREE.MeshBasicMaterial({ color: 0xffd06a });
+function aaBurst(from, aim, spread, speed, dmg, n) {
+  for (let k = 0; k < n; k++) {
+    const b = new THREE.Mesh(bulletG, aaBulletM);
+    b.position.copy(from); b.scale.setScalar(2.2); scene.add(b);
+    const dir = _v2.copy(aim).add(_v3.set(rand(-spread, spread), rand(-spread, spread), rand(-spread, spread))).normalize();
+    aaBullets.push({ mesh: b, vel: dir.clone().multiplyScalar(speed), life: 2.6, dmg });
+  }
+}
 function updateGround(dt) {
   const pc = P.craft;
   const target = P.alive && pc.airborne ? pc : null;
@@ -1778,18 +1811,13 @@ function updateGround(dt) {
     v.cooldown -= dt;
     if (v.cooldown > 0) continue;
     v.cooldown = 0.6;
-    if (!hasLOS(_v3.copy(v.pos).setY(v.pos.y + 8), target.pos)) continue;
+    if (!hasLOS(_v3.copy(v.pos).setY(v.pos.y + 10), target.pos)) continue;
     v.cooldown = CFG.aaCooldown * rand(0.8, 1.25);
     const travel = dist / CFG.aaBulletSpeed;
     _v.copy(target.pos).addScaledVector(target.vel, travel);
-    _v.y += 8 * travel * travel;                       // gunners allow for the drop
+    _v.y += 8 * travel * travel;
     _v.sub(v.pos).normalize();
-    for (let k = 0; k < 3; k++) {
-      const b = new THREE.Mesh(bulletG, aaBulletM);
-      b.position.copy(v.pos).addScaledVector(_v, 10); b.position.y += 6; b.scale.setScalar(1.8); scene.add(b);
-      const dir = _v.clone().add(_v2.set(rand(-0.035, 0.035), rand(-0.035, 0.035), rand(-0.035, 0.035))).normalize();
-      aaBullets.push({ mesh: b, vel: dir.multiplyScalar(CFG.aaBulletSpeed), life: 2.6 });
-    }
+    aaBurst(_v4.copy(v.pos).addScaledVector(_v, 14).setY(v.pos.y + 12), _v, 0.035, CFG.aaBulletSpeed, CFG.aaDamage, 3);
     beep(150, 0.05, 'square', 0.03);
   }
 }
@@ -1800,7 +1828,7 @@ function updateAABullets(dt) {
     b.life -= dt; b.vel.y -= 16 * dt; b.mesh.position.addScaledVector(b.vel, dt);
     let gone = b.life <= 0;
     if (!gone && P.alive && b.mesh.position.distanceTo(pc.pos) < CFG.playerHitR) {
-      hurtPlayer(CFG.aaDamage, 'FLAK'); puff(b.mesh.position, 1.8, 0xff8844, 0.4, 5); gone = true;
+      hurtPlayer(b.dmg, 'FLAK'); puff(b.mesh.position, 2.2, 0xff8844, 0.4, 5); gone = true;
     }
     if (!gone && b.mesh.position.y < terrainH(b.mesh.position.x, b.mesh.position.z)) gone = true;
     if (gone) { scene.remove(b.mesh); aaBullets.splice(i, 1); }
@@ -1817,8 +1845,8 @@ function spawnBandit(x, y, z, opts = {}) {
   c.speed = opts.speed || 175;
   c.maxHp = c.hp = opts.hp || 100;
   setGear(c, false);
-  const b = { craft: c, cd: rand(2, 5), missiles: opts.missiles != null ? opts.missiles : 2,
-    aggro: opts.aggro != null ? opts.aggro : 1, evade: 0, wp: null, wpT: 0, score: opts.score || 650, fall: 0 };
+  const b = { craft: c, cd: rand(3, 6), gunCd: rand(1, 3), aggro: opts.aggro != null ? opts.aggro : 1,
+    wp: null, wpT: 0, score: opts.score || 650, fall: 0 };
   planes.push(b);
   return b;
 }
@@ -1826,7 +1854,7 @@ function killBandit(b, byPlayer = true) {
   const c = b.craft;
   if (!c.alive) return;
   c.alive = false;
-  explode(c.pos, 3.0, true); noiseBurst(1.0, 0.3);
+  explode(c.pos, 4.0, true); sndBoom(true);
   c.model.traverse(o => { if (o.isMesh) o.material = WRECK_MAT; });
   b.fall = 0;
   if (byPlayer) { G.stats.air++; addScore(b.score); }
@@ -1840,31 +1868,29 @@ function updateBandits(dt) {
       b.fall += dt;
       c.root.position.y -= (40 + b.fall * 30) * dt;
       c.root.rotation.z += 1.6 * dt; c.root.rotation.x += 0.7 * dt;
-      if (b.fall % 0.12 < dt) puff(c.pos, 3, 0x3a3735, 1.6, 2);
-      if (c.pos.y < groundAt(c.pos.x, c.pos.z) + 4 || b.fall > 9) { explode(c.pos, 2.4, true); scene.remove(c.root); planes.splice(i, 1); }
+      if (b.fall % 0.12 < dt) puff(c.pos, 4, 0x3a3735, 1.6, 2);
+      if (c.pos.y < groundAt(c.pos.x, c.pos.z) + 6 || b.fall > 9) { explode(c.pos, 3, true); scene.remove(c.root); planes.splice(i, 1); }
       continue;
     }
     const toP = _v.copy(pc.pos).sub(c.pos);
     const dist = toP.length();
     let want = _v3, speed = 190;
-    if (b.evade > 0) {
-      b.evade -= dt;
-      want.copy(toP).normalize().negate(); want.y += 0.4; want.normalize(); speed = 280;
-    } else if (P.alive && dist < 4200 && b.aggro) {
+    if (P.alive && dist < 4200 && b.aggro) {
       const nose = _v2.copy(toP).normalize();
       craftAxes(c);
       const aspect = nose.dot(fwd);
-      if (dist < 260) { want.copy(fwd); want.y += 0.25; speed = 260; }
+      if (dist < 300) { want.copy(fwd); want.y += 0.25; speed = 260; }
       else if (aspect < -0.2) { want.copy(nose); want.y += 0.15; speed = 300; }
       else { want.copy(nose); speed = lerp(190, 280, clamp((dist - 300) / 1500, 0, 1)); }
-      b.cd -= dt;
-      if (aspect > 0.985 && dist < CFG.gunRange && b.cd <= 0 && Math.random() < DIFF.aceSkill) {
-        b.cd = 0.12;
-        tracer(c.pos, _v4.copy(pc.pos).add(_v2.set(rand(-14, 14), rand(-14, 14), rand(-14, 14))));
-        if (Math.random() < 0.35 * DIFF.aceSkill) hurtPlayer(3.5, 'GUNS');
-      } else if (aspect > 0.94 && dist > 600 && dist < 2400 && b.missiles > 0 && b.cd <= 0) {
-        b.cd = rand(7, 12) * (EASY ? 1.7 : 1); b.missiles--;
-        launchAAM(c, { pos: pc.pos, craft: pc, alive: true }, 'red');
+      b.gunCd -= dt; b.cd -= dt;
+      if (aspect > 0.975 && dist < 900 && b.gunCd <= 0) {           // tracer, so you can see it
+        b.gunCd = 1.3 / DIFF.aceSkill;
+        const travel = dist / CFG.aaBulletSpeed;
+        _v4.copy(pc.pos).addScaledVector(pc.vel, travel).sub(c.pos).normalize();
+        aaBurst(_v.copy(c.pos).addScaledVector(fwd, 12), _v4, 0.03, CFG.aaBulletSpeed, 6, 3);
+      } else if (aspect > 0.985 && dist > 500 && dist < 2200 && b.cd <= 0) {
+        b.cd = rand(6, 10) * (EASY ? 1.6 : 1);
+        launchRocket(c, 'red');
       }
     } else {
       if (!b.wp || b.wpT <= 0) { b.wp = new THREE.Vector3(rand(M.x0 * 0.8, M.x1 * 0.8), rand(280, 800), rand(M.z0 * 0.8, M.z1 * 0.8)); b.wpT = 12; }
@@ -1882,198 +1908,72 @@ function updateBandits(dt) {
 }
 
 /* ============================================================
-   PLAYER WEAPONS — the campaign's missile, plus guns and stores
+   THE ROCKET — one weapon, no lock, straight out of the nose
    ============================================================ */
-function selectWeapon(i) {
-  if (i > 2) return;
-  if (P.ammo[i] <= 0) { beep(180, 0.07, 'square', 0.05); return; }
-  P.weapon = i; beep(700, 0.05, 'square', 0.05);
-}
-function fireMissile(c) {
-  if (c.reloading > 0 || P.ammo[0] <= 0) { beep(170, 0.08, 'square', 0.05); return; }
-  P.ammo[0]--; G.stats.shots++;
+function launchRocket(c, team) {
   craftAxes(c);
   const m = makeMissileMesh();
-  m.position.copy(c.pos).addScaledVector(upV, -4).addScaledVector(fwd, 6);
-  m.quaternion.copy(c.root.quaternion); scene.add(m);
-  let tgt = null, best = CFG.assistCone;
-  const consider = (o, pos) => { _v.copy(pos).sub(m.position); const d = _v.length(); if (d > CFG.assistRange) return; const dot = _v.divideScalar(d).dot(fwd); if (dot > best) { best = dot; tgt = o; } };
-  for (const t of vehicles) if (t.alive) consider(t, t.pos);
-  for (const b of planes) if (b.craft.alive) consider(b, b.craft.pos);
-  missiles.push({ mesh: m, vel: fwd.clone().multiplyScalar(CFG.missileSpeed), life: CFG.missileLife, trail: 0, target: tgt, team: 'blue' });
-  beep(620, 0.4, 'sawtooth', 0.09, 0.3); noiseBurst(0.25, 0.08);
-  if (P.ammo[0] === 0) { c.reloading = CFG.reloadTime; beep(240, 0.1, 'sine', 0.05); }
+  m.scale.setScalar(team === 'red' ? 1.5 : 1.3);
+  m.position.copy(c.pos).addScaledVector(fwd, 9).addScaledVector(upV, -CFG.rocketDrop);
+  m.quaternion.copy(c.root.quaternion);
+  scene.add(m);
+  const speed = CFG.rocketSpeed * (team === 'red' ? 0.8 : 1);
+  rockets.push({ mesh: m, dir: fwd.clone(), speed, life: CFG.rocketLife, trail: 0, team, armed: 0 });
+  sndRocket();
+  if (team === 'red') showWarn('ROCKET');
 }
-function launchAAM(from, target, team) {
-  const m = makeMissileMesh(); m.scale.setScalar(0.85);
-  craftAxes(from);
-  m.position.copy(from.pos).addScaledVector(fwd, 8);
-  m.quaternion.copy(from.root.quaternion); scene.add(m);
-  missiles.push({ mesh: m, vel: fwd.clone().multiplyScalar(CFG.missileSpeed), life: CFG.missileLife, trail: 0, target, team });
-  beep(500, 0.4, 'sawtooth', 0.07, 0.35);
-  if (team === 'red') { showWarn('MISSILE'); }
+function firePlayerRocket() {
+  const c = P.craft;
+  if (c.reloading > 0) { beep(170, 0.08, 'square', 0.05); return; }
+  if (P.rockets <= 0) { beep(170, 0.08, 'square', 0.05); return; }
+  P.rockets--; G.stats.shots++;
+  launchRocket(c, 'blue');
+  if (P.rockets === 0) { c.reloading = CFG.reloadTime; beep(240, 0.1, 'sine', 0.05); }
 }
 function detonate(pos, team) {
-  explode(pos, 1.5, true); noiseBurst(0.8, 0.28); beep(90, 0.5, 'square', 0.1, 0.35);
+  explode(pos, 2.2, true); sndBoom(true);
   if (team === 'blue') {
-    for (const t of vehicles) { if (!t.alive) continue; const d = t.pos.distanceTo(pos); if (d < CFG.blastRadius) damageVehicle(t, CFG.blastDamage * (1 - d / CFG.blastRadius) + 60, t.pos); }
+    for (const t of vehicles) { if (!t.alive) continue; const d = t.pos.distanceTo(pos); if (d < CFG.blastRadius + t.hitR) damageVehicle(t, CFG.blastDamage * (1 - d / (CFG.blastRadius + t.hitR)) + 60, t.pos); }
     for (const b of planes) { if (!b.craft.alive) continue; const d = b.craft.pos.distanceTo(pos); if (d < CFG.blastRadius) { b.craft.hp -= CFG.blastDamage * (1 - d / CFG.blastRadius) + 60; if (b.craft.hp <= 0) killBandit(b); } }
   }
   if (P.alive && P.craft.pos.distanceTo(pos) < CFG.blastRadius * 0.8) {
     const d = P.craft.pos.distanceTo(pos);
-    hurtPlayer((team === 'red' ? 60 : 25) * (1 - d / (CFG.blastRadius * 0.8)) + 10, 'MISSILE');
+    hurtPlayer((team === 'red' ? 70 : 25) * (1 - d / (CFG.blastRadius * 0.8)) + 10, 'ROCKET');
   }
 }
-function updateMissiles(dt) {
-  for (let i = missiles.length - 1; i >= 0; i--) {
-    const m = missiles[i]; m.life -= dt;
-    let tgt = m.target;
-    if (m.team === 'red') {
-      for (const f of flares) if (f.mesh.position.distanceTo(m.mesh.position) < 240) { m.target = null; m.decoy = f; break; }
-      if (m.decoy) tgt = m.decoy.life > 0 ? { pos: m.decoy.mesh.position, alive: true } : null;
+function updateRockets(dt) {
+  for (let i = rockets.length - 1; i >= 0; i--) {
+    const r = rockets[i];
+    r.life -= dt; r.armed += dt;
+    r.mesh.position.addScaledVector(r.dir, r.speed * dt);      // dead straight, where you pointed it
+    r.trail -= dt;
+    if (r.trail <= 0) {
+      r.trail = LOW ? 0.04 : 0.011;
+      puff(r.mesh.position, 2.4, 0xe8e8e8, 0.7, 4);
+      puff(r.mesh.position, 1.3, 0xffb347, 0.16, 2);
     }
-    const tp = tgt ? (tgt.pos || (tgt.craft && tgt.craft.pos)) : null;
-    const live = tgt ? (tgt.alive !== false && (!tgt.craft || tgt.craft.alive)) : false;
-    if (tp && live) {
-      const dist = _v.copy(tp).sub(m.mesh.position).length();
-      _v3.copy(tp); if (tgt.craft) _v3.addScaledVector(tgt.craft.vel, Math.min(dist / CFG.missileSpeed, 1.6));
-      _v.copy(_v3).sub(m.mesh.position).normalize();
-      const g = clamp(CFG.missileTurn * (1 + 2.2 * clamp(1 - dist / 450, 0, 1)) * dt, 0, 1);
-      _v2.copy(m.vel).normalize().lerp(_v, g).normalize();
-      m.vel.copy(_v2).multiplyScalar(CFG.missileSpeed);
-      if (dist < 42 && m.lastDist != null && dist > m.lastDist) m.fuse = true;
-      m.lastDist = dist;
-    } else m.vel.y -= 9 * dt;
-    m.mesh.position.addScaledVector(m.vel, dt);
-    m.mesh.lookAt(_v.copy(m.mesh.position).add(m.vel));
-    m.trail -= dt; if (m.trail <= 0) { m.trail = LOW ? 0.05 : 0.012; puff(m.mesh.position, 1.6, 0xe8e8e8, 0.55, 3); }
-    const p = m.mesh.position;
-    let hit = !!m.fuse;
-    if (m.team === 'blue') {
-      for (const t of vehicles) if (t.alive && p.distanceTo(t.pos) < t.hitR + 8) hit = true;
-      for (const b of planes) if (b.craft.alive && p.distanceTo(b.craft.pos) < 24) hit = true;
-    } else if (P.alive && p.distanceTo(P.craft.pos) < 24) hit = true;
-    if (!hit && (p.y < groundAt(p.x, p.z) || buildingHit(p, 2))) hit = true;
-    if (hit) detonate(p, m.team);
-    if (hit || m.life <= 0) { scene.remove(m.mesh); missiles.splice(i, 1); }
-  }
-}
-function fireRocket(c) {
-  craftAxes(c);
-  const m = makeMissileMesh(); m.scale.setScalar(0.42);
-  m.position.copy(c.pos).addScaledVector(fwd, 6).addScaledVector(rightV, rand(-4, 4)).addScaledVector(upV, -2);
-  m.quaternion.copy(c.root.quaternion); scene.add(m);
-  const dir = _v2.copy(fwd).add(_v3.set(rand(-1, 1), rand(-1, 1), rand(-1, 1)).multiplyScalar(0.012)).normalize();
-  shells.push({ mesh: m, vel: dir.clone().multiplyScalar(CFG.rktSpeed + c.speed), life: CFG.rktLife, kind: 'rkt' });
-  beep(520, 0.14, 'sawtooth', 0.06, 0.5);
-}
-function dropBomb(c) {
-  craftAxes(c);
-  const m = makeBomb(); m.position.copy(c.pos).addScaledVector(upV, -2.4); scene.add(m);
-  bombs.push({ mesh: m, vel: fwd.clone().multiplyScalar(c.speed), life: 20 });
-  beep(200, 0.1, 'sine', 0.05);
-}
-function updateShells(dt) {
-  for (let i = shells.length - 1; i >= 0; i--) {
-    const s = shells[i]; s.life -= dt;
-    s.vel.y -= 12 * dt;
-    s.mesh.position.addScaledVector(s.vel, dt);
-    s.mesh.lookAt(_v.copy(s.mesh.position).add(s.vel));
-    if (Math.random() < 0.5) puff(s.mesh.position, 1.0, 0xdddddd, 0.3, 2);
-    const p = s.mesh.position;
+    const p = r.mesh.position;
     let hit = false;
-    for (const t of vehicles) if (t.alive && p.distanceTo(t.pos) < t.hitR + 4) hit = true;
-    if (!hit && (p.y < groundAt(p.x, p.z) || buildingHit(p, 2))) hit = true;
-    if (hit) { explode(p, 0.9, false); splash(p, 34, 150); }
-    if (hit || s.life <= 0) { scene.remove(s.mesh); shells.splice(i, 1); }
-  }
-}
-function updateBombs(dt) {
-  for (let i = bombs.length - 1; i >= 0; i--) {
-    const b = bombs[i]; b.life -= dt;
-    b.vel.y -= 62 * dt; b.vel.multiplyScalar(1 - CFG.bombDrag * dt);
-    b.mesh.position.addScaledVector(b.vel, dt);
-    b.mesh.lookAt(_v.copy(b.mesh.position).add(b.vel));
-    const p = b.mesh.position;
-    if (p.y < groundAt(p.x, p.z) || buildingHit(p, 2) || b.life <= 0) {
-      explode(p, 2.4, true); noiseBurst(0.8, 0.28); splash(p, 90, 300);
-      scene.remove(b.mesh); bombs.splice(i, 1);
+    if (r.armed > 0.1) {
+      if (r.team === 'blue') {
+        for (const t of vehicles) if (t.alive && p.distanceTo(t.pos) < t.hitR + 10) hit = true;
+        for (const b of planes) if (b.craft.alive && p.distanceTo(b.craft.pos) < b.craft.hitR + 10) hit = true;
+      } else if (P.alive && p.distanceTo(P.craft.pos) < 26) hit = true;
     }
+    if (!hit && (p.y < groundAt(p.x, p.z) || buildingHit(p, 2))) hit = true;
+    if (hit) detonate(p, r.team);
+    if (hit || r.life <= 0) { scene.remove(r.mesh); rockets.splice(i, 1); }
   }
-}
-function rayHit(from, dir, centre, radius) {
-  _v4.copy(centre).sub(from);
-  const t = _v4.dot(dir);
-  if (t < 0) return null;
-  const perp = Math.sqrt(Math.max(0, _v4.lengthSq() - t * t));
-  return perp < radius ? t : null;
 }
 function fireWeapons(dt) {
   const c = P.craft;
   if (!P.alive || !c.alive) return;
-  if (c.reloading > 0) { c.reloading -= dt; if (c.reloading <= 0) { P.ammo[0] = CFG.missileMax; beep(880, 0.12, 'sine', 0.06); showMsg('MISSILES RELOADED', 1.2); } }
-  P.gunCd -= dt; P.fireCd -= dt;
-  if (held(' ') && P.gunAmmo > 0 && P.gunCd <= 0) {
-    P.gunCd = CFG.gunRpm; P.gunAmmo--; G.stats.shots++;
-    craftAxes(c);
-    const from = _v.copy(c.pos).addScaledVector(fwd, 8);
-    const dir = _v2.copy(fwd).add(_v3.set(rand(-1, 1), rand(-1, 1), rand(-1, 1)).multiplyScalar(CFG.gunSpread)).normalize();
-    let victim = null, vd = CFG.gunRange, hitPt = null;
-    for (const b of planes) { if (!b.craft.alive) continue; const d = rayHit(from, dir, b.craft.pos, 13); if (d != null && d < vd) { vd = d; victim = b; } }
-    for (const t of vehicles) { if (!t.alive) continue; const d = rayHit(from, dir, t.pos, t.hitR + 3); if (d != null && d < vd) { vd = d; victim = t; } }
-    if (victim) hitPt = _v3.copy(from).addScaledVector(dir, vd);
-    else for (let s = 60; s < CFG.gunRange; s += 40) { const p = _v3.copy(from).addScaledVector(dir, s); if (p.y < groundAt(p.x, p.z)) { hitPt = p; vd = s; break; } }
-    tracer(from, hitPt || _v4.copy(from).addScaledVector(dir, CFG.gunRange));
-    if (victim) {
-      G.stats.hits++;
-      const dmg = CFG.gunDps * CFG.gunRpm * 3.2;
-      if (victim.craft) { victim.craft.hp -= dmg; puff(hitPt, 1.4, 0xffcc66, 0.25, 4); if (victim.craft.hp <= 0) killBandit(victim); }
-      else { damageVehicle(victim, dmg, hitPt); puff(hitPt, 1.6, 0xd8c8a0, 0.3, 5); }
-    } else if (hitPt) puff(hitPt, 1.5, 0xbdb096, 0.35, 5);
+  if (c.reloading > 0) {
+    c.reloading -= dt;
+    if (c.reloading <= 0) { P.rockets = CFG.rocketMax; beep(880, 0.12, 'sine', 0.06); showMsg('ROCKETS RELOADED', 1.2); }
   }
-  if (held('f') && P.fireCd <= 0) {
-    const w = P.weapon;
-    if (w === 0) { P.fireCd = 0.35; fireMissile(c); }
-    else if (w === 1 && P.ammo[1] > 0) { P.fireCd = 0.16; P.ammo[1]--; G.stats.shots++; fireRocket(c); }
-    else if (w === 2 && P.ammo[2] > 0) { P.fireCd = 0.5; P.ammo[2]--; G.stats.shots++; dropBomb(c); }
-    if (w > 0 && P.ammo[w] <= 0) { showMsg(WEP[w] + 'S EMPTY', 1.4); selectWeapon(0); }
-  }
-}
-
-/* ---- flares ---- */
-function popFlares() {
-  if (P.flares <= 0 || !P.alive) return;
-  P.flares--;
-  const c = P.craft;
-  for (let i = 0; i < 6; i++) {
-    const f = new THREE.Mesh(sphereG, matB(0xffe08a));
-    f.position.copy(c.pos); f.scale.setScalar(1.4); scene.add(f);
-    craftAxes(c);
-    flares.push({ mesh: f, vel: new THREE.Vector3(rand(-30, 30), rand(-25, 5), rand(-30, 30)).addScaledVector(fwd, -c.speed * 0.4), life: 3.4 });
-  }
-  beep(900, 0.12, 'square', 0.05, 0.4);
-}
-function updateFlares(dt) {
-  for (let i = flares.length - 1; i >= 0; i--) {
-    const f = flares[i]; f.life -= dt;
-    f.vel.y -= 22 * dt; f.mesh.position.addScaledVector(f.vel, dt);
-    f.mesh.scale.setScalar(1.4 * clamp(f.life / 1.2, 0.2, 1.6));
-    if (Math.random() < 0.5) puff(f.mesh.position, 1.4, 0xffb347, 0.4, 2);
-    if (f.life <= 0) { scene.remove(f.mesh); flares.splice(i, 1); }
-  }
-}
-
-/* ---- lock indicator: whatever the missile would grab ---- */
-function updateLock(dt) {
-  if (!P.alive) { P.lock = null; return; }
-  const c = P.craft;
-  craftAxes(c);
-  let best = CFG.assistCone, found = null;
-  const consider = (o, pos) => { _v.copy(pos).sub(c.pos); const d = _v.length(); if (d > CFG.assistRange || d < 40) return; const dot = _v.divideScalar(d).dot(fwd); if (dot > best) { best = dot; found = o; } };
-  for (const t of vehicles) if (t.alive) consider(t, t.pos);
-  for (const b of planes) if (b.craft.alive) consider(b, b.craft.pos);
-  if (found !== P.lock) { P.lock = found; P.lockT = 0; if (found) beep(1100, 0.06, 'square', 0.05); }
-  if (P.lock) { P.lockT += dt; if (P.lockT % 0.55 < dt) beep(1400, 0.04, 'square', 0.025); }
+  P.fireCd -= dt;
+  if ((held('f') || held(' ')) && P.fireCd <= 0) { P.fireCd = 0.45; firePlayerRocket(); }
 }
 
 /* ---- player damage ---- */
@@ -2092,7 +1992,7 @@ function hurtPlayer(n, why) {
 }
 function crash(c, reason) {
   if (!c.alive) return;
-  explode(c.pos, 3.0, true); noiseBurst(1.0, 0.3);
+  explode(c.pos, 3.4, true); sndBoom(true);
   c.alive = false; c.hp = 0;
   c.model.traverse(o => { if (o.isMesh) o.material = WRECK_MAT; });
   if (c === P.craft) { P.alive = false; G.stats.deaths++; P.lives--; P.respawn = 3.2; showWarn(reason); }
@@ -2103,14 +2003,11 @@ function crash(c, reason) {
    ============================================================ */
 const MODES = {
   strike: { name: 'GROUND STRIKE', short: 'STRIKE',
-    brief: 'Every red mark on the tac map is a target. Missiles lock whatever is in your nose, rockets and bombs do the rest. The AA guns will hose tracer at you the moment you come inside 780 metres of one — go in low and fast and do not circle.',
-    loadout: [CFG.missileMax, 16, 8] },
+    brief: 'Every red mark on the tac map is a target. One weapon: the rocket goes exactly where the nose is pointing, so line the aeroplane up and let it go. The AA guns hose tracer at anything inside 780 metres — go in low and fast and do not circle.' },
   dogfight: { name: 'DOGFIGHT', short: 'DOGFIGHT',
-    brief: 'Enemy fighters. Put them in your nose and the missile takes them; guns for the close stuff. When one gets behind you, break hard and punch flares.',
-    loadout: [CFG.missileMax, 0, 0] },
+    brief: 'Enemy fighters. Same rocket, no lock — put the nose on them and lead it yourself. Watch the mirror; they come from behind.' },
   run: { name: 'CONTRABAND RUN', short: 'THE RUN',
-    brief: 'Load at your strip, fly the cargo across, drop it low and slow on the marked zone, come home. Climb where a radar can see you and they scramble fighters.',
-    loadout: [CFG.missileMax, 0, 0] },
+    brief: 'Load at your strip, fly the cargo across, drop it low and slow on the marked zone, come home. Climb where a radar can see you and they scramble fighters.' },
 };
 const MODE = MODES[MODE_ID] || MODES.strike;
 const OBJ = { need: 0, done: 0, phase: '', drop: null, dropMesh: null, heat: 0, wave: 0 };
@@ -2155,7 +2052,7 @@ function buildStrike() {
   { const [x, z] = landSpot(1500);
     for (let i = 0; i < 4; i++) makeVehicle(i === 3 ? 'aa' : 'truck', x, z, 0, { patrol: { x, z, r: 200 + i * 26, a0: i * 0.32, w: 0.1 } }); }
   if (MAP.seaY != null) for (let i = 0; i < 3; i++) { const s = seaSpot(); if (s) makeVehicle('boat', s[0], s[1], rand(0, TAU), { y: MAP.seaY + 1, patrol: { x: s[0], z: s[1], r: 320, a0: rand(0, TAU), w: 0.05 } }); }
-  for (let i = 0; i < n(3); i++) spawnBandit(eb.x + rand(-900, 900), rand(500, 900), eb.z + rand(-900, 900), { missiles: 2 });
+  for (let i = 0; i < n(3); i++) spawnBandit(eb.x + rand(-900, 900), rand(500, 900), eb.z + rand(-900, 900));
   OBJ.need = vehicles.length;
   OBJ.phase = 'targets left';
 }
@@ -2174,7 +2071,7 @@ function spawnWave() {
     const a = rand(0, TAU), d = rand(2200, 3400);
     const x = clamp((c ? c.pos.x : 0) + Math.cos(a) * d, M.x0 + 200, M.x1 - 200);
     const z = clamp((c ? c.pos.z : 0) + Math.sin(a) * d, M.z0 + 200, M.z1 - 200);
-    spawnBandit(x, rand(400, 950), z, { missiles: EASY ? 1 : 3 });
+    spawnBandit(x, rand(400, 950), z);
   }
   if (OBJ.wave > 1) showMsg('BANDITS INBOUND — WAVE ' + OBJ.wave, 2.5);
 }
@@ -2242,8 +2139,7 @@ function cargoAction() {
   if (!c.airborne) {
     const b = nearBase(c.pos);
     if (!b) { showMsg('NOT AT A FIELD', 1.2); return; }
-    P.ammo = MODE.loadout.slice(); P.gunAmmo = CFG.gunAmmo; P.flares = CFG.flareCount;
-    c.hp = c.maxHp; c.reloading = 0;
+    P.rockets = CFG.rocketMax; c.hp = c.maxHp; c.reloading = 0;
     if (MODE_ID === 'run' && !P.cargo) { P.cargo = 1; showMsg('CARGO ABOARD — FLY IT TO THE MARKED ZONE', 3); }
     else showMsg('REARMED AND PATCHED UP', 2);
     beep(880, 0.18, 'sine', 0.06, 1.4);
@@ -2287,7 +2183,7 @@ function updateHeat(dt) {
   if (OBJ.heat >= 1 && planes.filter(b => b.craft.alive).length < 3) {
     OBJ.heat = 0.35;
     const a = rand(0, TAU);
-    spawnBandit(c.pos.x + Math.cos(a) * 3000, rand(500, 900), c.pos.z + Math.sin(a) * 3000, { missiles: 2 });
+    spawnBandit(c.pos.x + Math.cos(a) * 3000, rand(500, 900), c.pos.z + Math.sin(a) * 3000);
     showWarn('INTERCEPTORS SCRAMBLED');
   }
 }
@@ -2306,8 +2202,8 @@ function respawnPlayer() {
     c.root.position.set(b.x + Math.sin(b.hdg) * 1400, terrainH(b.x, b.z) + 620, b.z + Math.cos(b.hdg) * 1400);
     c.root.rotation.y = b.hdg; c.airborne = true; c.speed = CFG.speedStart; setGear(c, false);
   }
-  P.craft = c; P.alive = true; P.cargo = 0; P.weapon = 0;
-  P.ammo = MODE.loadout.slice(); P.gunAmmo = CFG.gunAmmo; P.flares = CFG.flareCount;
+  P.craft = c; P.alive = true; P.cargo = 0;
+  P.rockets = CFG.rocketMax;
   applyCamMode();
 }
 function endRound(won) {
@@ -2324,7 +2220,6 @@ const tac = el('tac'), tctx = tac.getContext('2d');
 tac.width = innerWidth; tac.height = innerHeight;
 const msgEl = el('msg'), warnEl = el('warn'), fadeEl = el('fade'), dmgEl = el('dmgFlash');
 const mapCv = el('map'), mctx = mapCv.getContext('2d');
-const wepEls = [el('w0'), el('w1'), el('w2'), el('w3')];
 
 function showMsg(t, s) { msgEl.textContent = t; msgEl.style.opacity = 1; G.msgTimer = s; }
 function showWarn(t) { warnEl.textContent = t; warnEl.style.opacity = 1; G.warnTimer = Math.max(G.warnTimer, 1.6); }
@@ -2370,8 +2265,8 @@ function drawMap() {
   for (const b of MAP.bases) { mctx.fillStyle = '#3ddc84'; mctx.fillRect(px(b.x) - 5, pz(b.z) - 5, 10, 10); }
   for (const t of vehicles) {
     if (!t.alive) continue;
-    mctx.fillStyle = t.kind === 'aa' ? '#ff5a3d' : 'rgba(255,150,100,.75)';
-    const s = t.kind === 'aa' ? 7 : 5;
+    mctx.fillStyle = t.kind === 'aa' ? '#ff5a3d' : 'rgba(255,160,110,.85)';
+    const s = t.kind === 'aa' ? 9 : 7;
     mctx.fillRect(px(t.pos.x) - s / 2, pz(t.pos.z) - s / 2, s, s);
   }
   for (const b of planes) { if (!b.craft.alive) continue; mctx.fillStyle = '#ff3d3d'; mctx.beginPath(); mctx.arc(px(b.craft.pos.x), pz(b.craft.pos.z), 5, 0, TAU); mctx.fill(); }
@@ -2391,39 +2286,27 @@ function drawMap() {
   mctx.fillStyle = 'rgba(255,255,255,.6)'; mctx.font = '15px monospace'; mctx.fillText('N', W / 2 - 5, 16);
 }
 
-/* ---- tactical overlay ---- */
+/* ---- overlay: horizon, crosshair, drop zone. No lock, no lead, no brackets. ---- */
 const _p = new THREE.Vector3();
 function project(pos) {
   _p.copy(pos).project(camera);
   if (_p.z > 1) return null;
   return [(_p.x * 0.5 + 0.5) * tac.width, (-_p.y * 0.5 + 0.5) * tac.height];
 }
-function bracket(sx, sy, size, col, solid) {
-  tctx.strokeStyle = col; tctx.lineWidth = solid ? 2.2 : 1.4;
-  const s = size, a = s * 0.34;
-  for (const [dx, dy] of [[-1, -1], [1, -1], [-1, 1], [1, 1]]) {
-    tctx.beginPath();
-    tctx.moveTo(sx + dx * s, sy + dy * s - dy * a); tctx.lineTo(sx + dx * s, sy + dy * s); tctx.lineTo(sx + dx * s - dx * a, sy + dy * s);
-    tctx.stroke();
-  }
-}
 function drawTac() {
   tctx.clearRect(0, 0, tac.width, tac.height);
   if (!P.craft) return;
   const c = P.craft, cx = tac.width / 2, cy = tac.height / 2;
   craftAxes(c);
-
-  // horizon + pitch ladder
   if (P.alive) {
     tctx.save();
-    tctx.strokeStyle = 'rgba(140,255,190,.30)'; tctx.lineWidth = 1.2;
+    tctx.strokeStyle = 'rgba(140,255,190,.28)'; tctx.lineWidth = 1.2;
     const bank = Math.atan2(rightV.y, upV.y);
     const pitch = Math.asin(clamp(fwd.y, -1, 1));
     const ppd = tac.height / 1.5;
-    tctx.translate(cx, cy); tctx.rotate(-bank);
-    tctx.translate(0, pitch * ppd);
+    tctx.translate(cx, cy); tctx.rotate(-bank); tctx.translate(0, pitch * ppd);
     tctx.beginPath(); tctx.moveTo(-260, 0); tctx.lineTo(-70, 0); tctx.moveTo(70, 0); tctx.lineTo(260, 0); tctx.stroke();
-    tctx.font = '11px monospace'; tctx.fillStyle = 'rgba(140,255,190,.45)';
+    tctx.font = '11px monospace'; tctx.fillStyle = 'rgba(140,255,190,.42)';
     for (let d = -60; d <= 60; d += 10) {
       if (!d) continue;
       const y = -d * Math.PI / 180 * ppd, w = d > 0 ? 90 : 70;
@@ -2431,84 +2314,26 @@ function drawTac() {
       tctx.beginPath(); tctx.moveTo(-w, y); tctx.lineTo(-40, y); tctx.moveTo(40, y); tctx.lineTo(w, y); tctx.stroke();
       tctx.fillText(Math.abs(d), -w - 20, y + 4);
     }
-    tctx.setLineDash([]);
-    tctx.restore();
+    tctx.setLineDash([]); tctx.restore();
   }
-
-  // gun pipper
-  tctx.strokeStyle = 'rgba(200,255,220,.85)'; tctx.lineWidth = 1.6;
-  tctx.beginPath(); tctx.arc(cx, cy, 9, 0, TAU); tctx.stroke();
-  tctx.beginPath(); tctx.moveTo(cx - 22, cy); tctx.lineTo(cx - 12, cy); tctx.moveTo(cx + 12, cy); tctx.lineTo(cx + 22, cy);
-  tctx.moveTo(cx, cy - 22); tctx.lineTo(cx, cy - 12); tctx.stroke();
-
-  // contacts
-  const list = [];
-  for (const b of planes) if (b.craft.alive) list.push({ pos: b.craft.pos, o: b, air: true, col: '#ff5555', label: 'BANDIT' });
-  for (const t of vehicles) if (t.alive && t.pos.distanceTo(c.pos) < 2600) list.push({ pos: t.pos, o: t, air: false, col: t.kind === 'aa' ? '#ff7a4a' : 'rgba(255,180,140,.75)', label: VNAME[t.kind] });
-  for (const k of list) {
-    const d = k.pos.distanceTo(c.pos);
-    if (d > (k.air ? 5200 : 3000)) continue;
-    const s = project(k.pos);
-    if (!s) continue;
-    const size = clamp(1400 / d * 14, 8, 46);
-    const locked = P.lock && (P.lock === k.o);
-    bracket(s[0], s[1], size, locked ? '#8ff0b8' : k.col, locked);
-    if (locked || d < 1500) {
-      tctx.fillStyle = locked ? '#8ff0b8' : k.col;
-      tctx.font = '11px monospace';
-      tctx.fillText(k.label + '  ' + Math.round(d) + 'm', s[0] + size + 6, s[1] - size + 10);
-    }
-    if (locked) { tctx.fillStyle = '#8ff0b8'; tctx.font = 'bold 12px monospace'; tctx.fillText('LOCK', s[0] + size + 6, s[1] - size - 4); }
-  }
-  // gun lead reticle on the locked contact
-  if (P.lock) {
-    const tp = P.lock.craft ? P.lock.craft.pos : P.lock.pos;
-    const tv = P.lock.craft ? _v2.copy(P.lock.craft.vel) : _v2.set(0, 0, 0);
-    const d = tp.distanceTo(c.pos);
-    const tof = d / 1100;
-    const lead = _v3.copy(tp).addScaledVector(tv, tof);
-    const s = project(lead);
-    if (s && d < CFG.gunRange) {
-      tctx.strokeStyle = 'rgba(255,240,150,.95)'; tctx.lineWidth = 2;
-      tctx.beginPath(); tctx.arc(s[0], s[1], 7, 0, TAU); tctx.stroke();
-      tctx.beginPath(); tctx.moveTo(cx, cy); tctx.lineTo(s[0], s[1]); tctx.strokeStyle = 'rgba(255,240,150,.25)'; tctx.lineWidth = 1; tctx.stroke();
-    }
-  }
-  // CCIP: where the rocket / bomb actually lands
-  if (P.alive && (P.weapon === 1 || P.weapon === 2) && P.ammo[P.weapon] > 0) {
-    const bomb = P.weapon === 2;
-    const pos = _v.copy(c.pos), vel = _v2.copy(fwd).multiplyScalar(bomb ? c.speed : CFG.rktSpeed + c.speed);
-    const grav = bomb ? 62 : 12, drag = bomb ? CFG.bombDrag : 0;
-    let hit = null;
-    for (let i = 0; i < 300; i++) {
-      const h = 0.05;
-      vel.y -= grav * h;
-      if (drag) vel.multiplyScalar(1 - drag * h);
-      pos.addScaledVector(vel, h);
-      if (pos.y < groundY(pos.x, pos.z)) { hit = pos; break; }
-      if (!bomb && i * h > CFG.rktLife) break;
-    }
-    if (hit) {
-      const s = project(hit);
-      if (s) {
-        tctx.strokeStyle = 'rgba(255,210,120,.95)'; tctx.lineWidth = 1.8;
-        tctx.beginPath(); tctx.arc(s[0], s[1], 11, 0, TAU); tctx.stroke();
-        tctx.beginPath(); tctx.moveTo(s[0] - 17, s[1]); tctx.lineTo(s[0] - 6, s[1]); tctx.moveTo(s[0] + 6, s[1]); tctx.lineTo(s[0] + 17, s[1]);
-        tctx.moveTo(s[0], s[1] - 17); tctx.lineTo(s[0], s[1] - 6); tctx.moveTo(s[0], s[1] + 6); tctx.lineTo(s[0], s[1] + 17); tctx.stroke();
-        tctx.strokeStyle = 'rgba(255,210,120,.28)'; tctx.lineWidth = 1;
-        tctx.beginPath(); tctx.moveTo(cx, cy); tctx.lineTo(s[0], s[1]); tctx.stroke();
-        tctx.fillStyle = 'rgba(255,210,120,.9)'; tctx.font = '10px monospace';
-        tctx.fillText(bomb ? 'CCIP' : 'RKT', s[0] + 15, s[1] + 16);
-      }
-    }
-  }
-  // drop zone
+  // where the nose is pointing — that is where the rocket goes
+  tctx.strokeStyle = 'rgba(200,255,220,.9)'; tctx.lineWidth = 1.6;
+  tctx.beginPath(); tctx.arc(cx, cy, 7, 0, TAU); tctx.stroke();
+  tctx.beginPath();
+  tctx.moveTo(cx - 26, cy); tctx.lineTo(cx - 13, cy); tctx.moveTo(cx + 13, cy); tctx.lineTo(cx + 26, cy);
+  tctx.moveTo(cx, cy - 26); tctx.lineTo(cx, cy - 13); tctx.moveTo(cx, cy + 13); tctx.lineTo(cx, cy + 26);
+  tctx.stroke();
+  // drop zone in the run
   if (OBJ.drop && P.cargo) {
     const p = _v.set(OBJ.drop.x, OBJ.drop.y + 90, OBJ.drop.z);
     const s = project(p);
     const d = Math.hypot(c.pos.x - OBJ.drop.x, c.pos.z - OBJ.drop.z);
-    if (s) { bracket(s[0], s[1], 26, '#8ff0b8', true); tctx.fillStyle = '#8ff0b8'; tctx.font = '12px monospace'; tctx.fillText('DROP ZONE ' + Math.round(d) + 'm', s[0] + 32, s[1] + 4); }
-    else edgeArrow(p, '#8ff0b8');
+    if (s) {
+      tctx.strokeStyle = '#8ff0b8'; tctx.lineWidth = 2;
+      tctx.strokeRect(s[0] - 26, s[1] - 26, 52, 52);
+      tctx.fillStyle = '#8ff0b8'; tctx.font = '12px monospace';
+      tctx.fillText('DROP ZONE ' + Math.round(d) + 'm', s[0] + 34, s[1] + 4);
+    } else edgeArrow(p, '#8ff0b8');
   }
 }
 function edgeArrow(pos, col) {
@@ -2517,53 +2342,50 @@ function edgeArrow(pos, col) {
   let x = _p.x, y = -_p.y;
   if (_p.z > 1) { x = -x; y = -y; }
   const a = Math.atan2(y, x), r = Math.min(tac.width, tac.height) * 0.36;
-  const sx = cx + Math.cos(a) * r, sy = cy + Math.sin(a) * r;
-  tctx.save(); tctx.translate(sx, sy); tctx.rotate(a);
+  tctx.save(); tctx.translate(cx + Math.cos(a) * r, cy + Math.sin(a) * r); tctx.rotate(a);
   tctx.fillStyle = col; tctx.beginPath(); tctx.moveTo(12, 0); tctx.lineTo(-6, -7); tctx.lineTo(-6, 7); tctx.closePath(); tctx.fill();
   tctx.restore();
 }
 
 /* ---- panel HUD ---- */
+function updateMuteUI() {
+  const e = el('mute');
+  e.textContent = muted ? 'SOUND OFF · M' : 'SOUND ON · M';
+  e.classList.toggle('off', muted);
+}
+el('mute').addEventListener('click', toggleMute);
+updateMuteUI();
+
 function updateHUD(dt) {
   const c = P.craft;
   if (G.msgTimer > 0) { G.msgTimer -= dt; if (G.msgTimer <= 0) msgEl.style.opacity = 0; }
   if (G.warnTimer > 0) { G.warnTimer -= dt; warnEl.style.opacity = (G.warnTimer * 6) % 1 > 0.4 ? 1 : 0.15; if (G.warnTimer <= 0) warnEl.style.opacity = 0; }
   if (dmgT > 0) { dmgT -= dt; if (dmgT <= 0) dmgEl.style.opacity = 0; }
   if (!c) return;
-  const agl = c.pos.y - groundY(c.pos.x, c.pos.z);
+  const agl = c.pos.y - groundAt(c.pos.x, c.pos.z);
   el('spd').textContent = Math.round(c.speed * 1.94);
   el('alt').textContent = Math.round(Math.max(0, agl) * 3.28);
-  const thr = clamp((c.speed - CFG.speedMin) / (CFG.speedMax - CFG.speedMin), 0, 1);
-  el('thr').style.width = (thr * 100) + '%';
+  el('thr').style.width = (clamp((c.speed - CFG.speedMin) / (CFG.speedMax - CFG.speedMin), 0, 1) * 100) + '%';
   el('thrWrap').classList.toggle('ab', held('shift'));
   el('hpBar').firstElementChild.style.width = clamp(c.hp / c.maxHp, 0, 1) * 100 + '%';
   el('hpWrap').classList.toggle('hurt', c.hp < c.maxHp * 0.4);
   el('gearTxt').textContent = !c.airborne ? (P.atBase ? 'ON THE DECK · E TO REARM' : 'ON THE DECK') : c.gear ? 'GEAR DOWN' : '';
-  for (let i = 0; i < 3; i++) {
-    const e = wepEls[i];
-    e.classList.toggle('sel', P.weapon === i);
-    e.classList.toggle('out', P.ammo[i] <= 0);
-    e.lastElementChild.textContent = i === 0 && c.reloading > 0 ? 'RLD' : P.ammo[i] > 0 ? P.ammo[i] : '—';
-  }
-  wepEls[3].lastElementChild.textContent = P.gunAmmo;
-  el('flareN').textContent = P.flares;
-  el('scoreVal').textContent = MODE_ID === 'run' ? '€' + G.money.toLocaleString() : G.score.toLocaleString();
+  el('rktN').textContent = P.rockets;
+  el('rktState').textContent = c.reloading > 0 ? 'RELOADING ' + c.reloading.toFixed(1) + 's' : P.rockets ? 'READY' : 'EMPTY';
+  el('scoreVal').textContent = MODE_ID === 'run' ? '\u20ac' + G.money.toLocaleString() : G.score.toLocaleString();
   el('score').firstElementChild.textContent = MODE_ID === 'run' ? 'TAKINGS' : 'SCORE';
   const t = TIMED ? Math.max(0, G.limit - G.time) : G.time;
-  el('clockVal').textContent = Math.floor(t / 60) + ':' + String(Math.floor(t % 60)).padStart(2, '0');
-  el('clock').firstElementChild.textContent = TIMED ? 'TIME LEFT' : 'ELAPSED';
-  el('objTitle').textContent = MODE.name + ' · ' + MAP.name;
-  el('objSub').textContent = MODE_ID === 'run'
-    ? (P.cargo ? 'CARGO ABOARD — ' + Math.round(Math.hypot(c.pos.x - OBJ.drop.x, c.pos.z - OBJ.drop.z)) + 'm to the zone' : 'LAND AT ' + MAP.bases[0].name + ' AND PRESS E TO LOAD')
-      + (TIMED ? '' : '  ·  ' + OBJ.done + '/' + OBJ.need + ' runs')
-    : (TIMED ? remaining() + ' ' + OBJ.phase + ' · rack up the score' : remaining() + ' ' + OBJ.phase);
+  const clock = Math.floor(t / 60) + ':' + String(Math.floor(t % 60)).padStart(2, '0');
+  el('objTitle').textContent = MODE.name + ' \u00b7 ' + MAP.name;
+  el('objSub').textContent = (TIMED ? clock + ' left' : clock) + '  \u00b7  ' + (MODE_ID === 'run'
+    ? (P.cargo ? 'CARGO ABOARD \u2014 ' + Math.round(Math.hypot(c.pos.x - OBJ.drop.x, c.pos.z - OBJ.drop.z)) + 'm to the zone' : 'LAND AT ' + MAP.bases[0].name + ' AND PRESS E TO LOAD')
+    : remaining() + ' ' + OBJ.phase);
   el('hint').innerHTML = P.alive
-    ? '<b>' + WEP[P.weapon] + '</b> · F fire · SPACE guns · 1-3 weapon · R flares · G gear · C view'
-    : '<b>RESPAWNING…</b> ' + Math.ceil(P.respawn) + '   ·   ' + P.lives + ' aircraft left';
-  // low warnings
+    ? 'F or SPACE fires \u00b7 the rocket goes where the nose points \u00b7 G gear \u00b7 C view \u00b7 M sound'
+    : '<b>RESPAWNING\u2026</b> ' + Math.ceil(P.respawn) + '   \u00b7   ' + P.lives + ' aircraft left';
   if (P.alive && c.airborne) {
-    if (agl < 90 && fwd.y < -0.12) { showWarn('PULL UP'); }
-    else if (c.hp < c.maxHp * 0.25) { if (G.warnTimer <= 0) showWarn('AIRFRAME CRITICAL'); }
+    if (agl < 90 && fwd.y < -0.12) showWarn('PULL UP');
+    else if (c.hp < c.maxHp * 0.25 && G.warnTimer <= 0) showWarn('AIRFRAME CRITICAL');
   }
   drawTac();
   drawMap();
@@ -2627,7 +2449,7 @@ function simulate(dt) {
   if (TIMED && G.time >= G.limit) { endRound(true); return; }
   if (P.alive) {
     flyPlayer(P.craft, dt);
-    if (P.alive) { fireWeapons(dt); updateLock(dt); }
+    if (P.alive) fireWeapons(dt);
   } else {
     P.respawn -= dt;
     if (P.respawn <= 0) { if (P.lives <= 0) { endRound(false); return; } respawnPlayer(); }
@@ -2635,10 +2457,7 @@ function simulate(dt) {
   updateGround(dt);
   updateAABullets(dt);
   updateBandits(dt);
-  updateMissiles(dt);
-  updateShells(dt);
-  updateBombs(dt);
-  updateFlares(dt);
+  updateRockets(dt);
   updateDrops(dt);
   updateHeat(dt);
   updateSmoke(dt);
@@ -2646,13 +2465,28 @@ function simulate(dt) {
 }
 
 const clock = new THREE.Clock();
+const MIRROR = { x: 20, y: 20, w: 240, h: 130 };
+renderer.autoClear = false;
 function tick() {
   requestAnimationFrame(tick);
   const dt = Math.min(clock.getDelta(), 0.05);
   simulate(dt);
   updateCamera(dt);
   updateHUD(dt);
+  renderer.clear();
   renderer.render(scene, camera);
+  if (P.craft && G.running) {                       // the wing mirror
+    updateMirrorCam();
+    const y = innerHeight - MIRROR.y - MIRROR.h;
+    mirrorCam.aspect = MIRROR.w / MIRROR.h; mirrorCam.updateProjectionMatrix();
+    renderer.setScissorTest(true);
+    renderer.setViewport(MIRROR.x, y, MIRROR.w, MIRROR.h);
+    renderer.setScissor(MIRROR.x, y, MIRROR.w, MIRROR.h);
+    renderer.clearDepth();
+    renderer.render(scene, mirrorCam);
+    renderer.setScissorTest(false);
+    renderer.setViewport(0, 0, innerWidth, innerHeight);
+  }
 }
 {
   const b = MAP.bases[0];
@@ -2663,8 +2497,8 @@ function tick() {
 buildMiniMap();
 tick();
 
-window.__air = { THREE, scene, camera, MAP, MODE, MODE_ID, P, G, OBJ, CFG, DIFF, CFGaaRange: CFG.aaRange, aaBullets, vehicles, planes, missiles, buildings, TREE_SPOTS,
-  __bulletCount: () => aaBullets.length,
+window.__air = { THREE, scene, camera, MAP, MODE, MODE_ID, P, G, OBJ, CFG, DIFF, aaBullets, vehicles, planes, rockets, buildings, TREE_SPOTS,
+  __bulletCount: () => aaBullets.length, mirrorCam,
   terrainH, groundAt, groundY: groundAt, overWater, startGame, spawnBandit, makeVehicle, respawnPlayer, keys, simulate, nearestTree };
 
 </script>
