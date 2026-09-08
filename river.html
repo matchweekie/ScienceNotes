@@ -15,7 +15,6 @@
          text-shadow:0 2px 0 rgba(0,0,0,.45), 0 0 14px rgba(0,0,0,.35); letter-spacing:.03em; }
   #timer { position:absolute; top:18px; left:24px; font-size:30px; }
   #who { position:absolute; top:56px; left:24px; font-size:15px; color:#8ff0a4; letter-spacing:.12em; }
-  #roster { position:absolute; top:80px; left:24px; font-size:13px; color:#cfe8ff; letter-spacing:.08em; line-height:1.5; opacity:.9; }
   #tally { position:absolute; top:16px; left:0; right:0; text-align:center; font-size:38px; line-height:1.15; }
   #tally small { display:block; font-size:22px; opacity:.9; }
   #front { position:absolute; top:18px; right:24px; text-align:right; font-size:20px; line-height:1.3; }
@@ -82,7 +81,6 @@
   <div id="timer">0 sec</div>
   <div id="tally"><span id="sectorMain">SECTOR 1 · THE CROSSING</span><small id="sectorTxt"></small></div>
   <div id="who"></div>
-  <div id="roster"></div>
   <div id="front">FRONT<b id="frontTxt">FIELDS</b></div>
 
   <div id="cross"><svg viewBox="0 0 100 100">
@@ -194,9 +192,6 @@ const DIFF = EASY ? { count: 0.6, tankCd: 5.5, spread: 0.06, infHit: 0.3, infDmg
    HELPERS
    ============================================================ */
 const TAU = Math.PI * 2;
-const REAL_RANDOM = Math.random;
-function seedRandom(seed) { let a = seed >>> 0; Math.random = function () { a |= 0; a = a + 0x6D2B79F5 | 0; let t = Math.imul(a ^ a >>> 15, 1 | a); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
-seedRandom(20260907);   // world generation is deterministic; real randomness comes back before the game starts
 const clamp = (v, a, b) => v < a ? a : v > b ? b : v;
 const lerp  = (a, b, t) => a + (b - a) * t;
 const rand  = (a, b) => a + Math.random() * (b - a);
@@ -240,6 +235,30 @@ const FORESTS = [ // dense woods in the fields and up the mountain
 ];
 const inForest = (x, z, pad = 0) => FORESTS.some(f => Math.hypot(x - f.x, z - f.z) < f.r + pad);
 
+/* ---- THE CANYON: a gorge cutting east through the mountain climb to the volcano ---- */
+const CANYON = { x0: 1620, x1: 3060, halfW: 100 };
+function canyonCentre(x) {           // meandering centreline
+  const u = (x - CANYON.x0) / (CANYON.x1 - CANYON.x0);
+  return Math.sin(u * 4.1 + 0.4) * 300 + Math.sin(u * 9.3 + 1.7) * 90;
+}
+function canyonFloorY(x) {           // floor climbs gently west -> east, so the river runs west
+  const u = clamp((x - CANYON.x0) / (CANYON.x1 - CANYON.x0), 0, 1);
+  return lerp(-38, 58, u) + Math.sin(u * 15.5) * 4;
+}
+function canyonAmb(x) { const r = smooth((x - 1250) / 2000); return 400 * r * r; }   // rim height above it
+// 0 outside, 1 on the floor; everything between is the wall
+function canyonMask(x, z) {
+  if (x < CANYON.x0 - 170 || x > CANYON.x1 + 170) return 0;
+  const dz = Math.abs(z - canyonCentre(x));
+  const depth = Math.max(30, canyonAmb(x) - canyonFloorY(x));
+  const band = 40 + depth * 0.16;                 // wall thickness -> steepness (deeper = still steep)
+  if (dz > CANYON.halfW + band) return 0;
+  let t = dz <= CANYON.halfW ? 1 : 1 - (dz - CANYON.halfW) / band;
+  t = 1 - Math.pow(1 - t, 2.4);                   // near-vertical just under the rim, flat on the floor
+  return t * smooth((x - (CANYON.x0 - 170)) / 240) * smooth(((CANYON.x1 + 170) - x) / 240);
+}
+function inCanyonWall(x, z) { const t = canyonMask(x, z); return t > 0.08 && t < 0.9; }
+
 function baseHeight(x, z) {
   let h = Math.sin(x * 0.0017) * Math.cos(z * 0.0015) * 5 + Math.sin(x * 0.0061 + 1.1) * Math.cos(z * 0.0053) * 2.2;
   // river channel with banks
@@ -252,6 +271,14 @@ function baseHeight(x, z) {
     h += SIDE_MTN.h * t * t + Math.sin(x * 0.03) * Math.cos(z * 0.027) * 12 * t; }
   // the big climb east of the city
   { const r = smooth((x - 1250) / 2000); h += 400 * r * r + (Math.sin(x * 0.021) * Math.cos(z * 0.018) * 30 + Math.sin(x * 0.055 + 1) * Math.cos(z * 0.05) * 9) * r; }
+  // the canyon
+  { const t = canyonMask(x, z);
+    if (t > 0) {
+      const dz = Math.abs(z - canyonCentre(x)), fy = canyonFloorY(x);
+      const bed = dz < 70 ? -6.5 * (1 - dz / 70) : 0;                       // river channel in the floor
+      const floor = fy + Math.pow(Math.min(1, dz / CANYON.halfW), 2) * 7 + bed;
+      h = lerp(h, Math.min(h, floor), t);
+    } }
   // volcano cone + crater
   { const d = Math.hypot(x - VOLCANO.x, z - VOLCANO.z);
     if (d < VOLCANO.r) {
@@ -406,6 +433,7 @@ function buildTerrain() {
   const GRASS = new THREE.Color(0x62893f), GRASS2 = new THREE.Color(0x7c9d48), DIRT = new THREE.Color(0xa88a5e), DIRT2 = new THREE.Color(0x8f7048);
   const ROAD = new THREE.Color(0x55534a), ROCK = new THREE.Color(0x9a7b57), ROCK2 = new THREE.Color(0x7a6448), ASPH = new THREE.Color(0x6a6c6a);
   const SAND = new THREE.Color(0xc9b98a), DARKROCK = new THREE.Color(0x3d3a38), LAVA = new THREE.Color(0xff5a1a), FOREST = new THREE.Color(0x4f7a38);
+  const CAN_W = new THREE.Color(0xc39a6b), CAN_D = new THREE.Color(0x6d4c31), CAN_F = new THREE.Color(0xc6b88f);
   for (let i = 0; i < pos.count; i++) {
     const x = pos.getX(i), z = pos.getZ(i);
     const y = terrainHeight(x, z);
@@ -427,6 +455,15 @@ function buildTerrain() {
     // side mountain, big climb, volcano: rock
     { const d = Math.hypot(x - SIDE_MTN.x, z - SIDE_MTN.z); if (d < SIDE_MTN.r) c.lerp(ROCK.clone().lerp(ROCK2, patch), smooth(1 - d / SIDE_MTN.r) * 1.2); }
     if (y > 120 && x > 1250) c.lerp(ROCK2, clamp((y - 120) / 250, 0, 0.7));
+    // canyon: banded sandstone walls, gravel and wet rock on the floor
+    { const ct = canyonMask(x, z);
+      if (ct > 0.02) {
+        const strat = clamp((Math.sin(y * 0.062) + Math.sin(y * 0.019 + 1.3)) * 0.24 + (hash2(Math.round(x / 26), Math.round(z / 26)) - 0.5) * 0.5 + 0.5, 0, 1);
+        c.lerp(CAN_W.clone().lerp(CAN_D, strat), clamp(ct * 1.9, 0, 1));
+        const fy = canyonFloorY(x);
+        if (y < fy + 10) c.lerp(CAN_F, smooth(1 - (y - fy) / 10) * 0.9);
+        if (y < fy + 2.5) c.lerp(CAN_D, 0.45);
+      } }
     { const d = Math.hypot(x - VOLCANO.x, z - VOLCANO.z);
       if (d < VOLCANO.r) c.lerp(DARKROCK, smooth(1 - d / VOLCANO.r) * 1.4);
       if (d < VOLCANO.crater * 0.7) c.lerp(LAVA, smooth(1 - d / (VOLCANO.crater * 0.7))); }
@@ -447,6 +484,21 @@ function buildTerrain() {
   sea.rotation.x = -Math.PI / 2; sea.position.y = -120; scene.add(sea);
   const river = new THREE.Mesh(new THREE.PlaneGeometry(RIVER.x1 - RIVER.x0 + 120, MAP.z1 - MAP.z0 + 400), new THREE.MeshLambertMaterial({ color: 0x3b7fb0, transparent: true, opacity: 0.9 }));
   river.rotation.x = -Math.PI / 2; river.position.set((RIVER.x0 + RIVER.x1) / 2, RIVER.water, 0); scene.add(river);
+  // river along the canyon floor
+  { const segs = 190, pts = [], idx = [];
+    for (let i = 0; i <= segs; i++) {
+      const x = lerp(CANYON.x0 - 70, CANYON.x1 - 30, i / segs);
+      const cz = canyonCentre(x), y = canyonFloorY(x) - 2.5;        // 4 m above the cut channel, banks either side
+      const hw = 32 + Math.sin(i * 0.31) * 5;
+      pts.push(x, y, cz - hw, x, y, cz + hw);
+      if (i < segs) { const k = i * 2; idx.push(k, k + 1, k + 2, k + 1, k + 3, k + 2); }
+    }
+    const rg = new THREE.BufferGeometry();
+    rg.setAttribute('position', new THREE.Float32BufferAttribute(pts, 3));
+    rg.setIndex(idx); rg.computeVertexNormals();
+    const rm = new THREE.Mesh(rg, new THREE.MeshLambertMaterial({ color: 0x4d93bd, transparent: true, opacity: 0.88, side: THREE.DoubleSide }));
+    scene.add(rm);
+  }
   // lava glow in the crater
   const lava = new THREE.Mesh(new THREE.CircleGeometry(VOLCANO.crater * 0.75, 32), new THREE.MeshBasicMaterial({ color: 0xff4a12 }));
   lava.rotation.x = -Math.PI / 2; lava.position.set(VOLCANO.x, terrainHeight(VOLCANO.x, VOLCANO.z) + 1, VOLCANO.z); scene.add(lava);
@@ -457,7 +509,8 @@ buildTerrain();
 function scatterTrees() {
   const spots = [];
   const ok = (x, z) => x > MAP.x0 + 80 && x < MAP.x1 - 80 && z > MAP.z0 + 80 && z < MAP.z1 - 80 && !inCity(x, z, 90) && !nearSpawn(x, z, 60) && !inRiver(x, z) && !onBridgeRoad(x, z)
-                       && Math.hypot(x - VOLCANO.x, z - VOLCANO.z) > VOLCANO.r * 0.55 && !(Math.hypot(x - SIDE_MTN.x, z - SIDE_MTN.z) < SIDE_MTN.r * 0.6);
+                       && Math.hypot(x - VOLCANO.x, z - VOLCANO.z) > VOLCANO.r * 0.55 && !(Math.hypot(x - SIDE_MTN.x, z - SIDE_MTN.z) < SIDE_MTN.r * 0.6)
+                       && canyonMask(x, z) < 0.12;
   const c0x = Math.floor(MAP.x0 / FIELD) - 1, c1x = Math.floor(MAP.x1 / FIELD) + 1, c0z = Math.floor(MAP.z0 / FIELD) - 1, c1z = Math.floor(MAP.z1 / FIELD) + 1;
   for (let ix = c0x; ix <= c1x; ix++) for (let iz = c0z; iz <= c1z; iz++) {
     const cx = ix * FIELD;
@@ -538,7 +591,7 @@ function roofUnder(x, z, pad = 0.5) {
   return top;
 }
 function groundAt(x, z) { return Math.max(terrainHeight(x, z), roofUnder(x, z)); }
-function overWater(x, z) { return terrainHeight(x, z) < RIVER.water - 1 && roofUnder(x, z) === -Infinity; }
+function overWater(x, z) { return terrainHeight(x, z) < RIVER.water - 1 && roofUnder(x, z) === -Infinity && canyonMask(x, z) < 0.2; }   // the canyon floor is dry land, not the river
 
 function facadeTexture(storeys, base, panel, win, lit) {
   const W = 256, H = 64 * storeys;
@@ -716,7 +769,7 @@ function buildRocks() {
   const d = new THREE.Object3D(); let k = 0;
   for (let i = 0; i < N * 4 && k < N; i++) {
     const x = rand(1350, 3350), z = rand(MAP.z0 + 150, MAP.z1 - 150);
-    if (nearestTree(x, z, 10) || Math.hypot(x - VOLCANO.x, z - VOLCANO.z) < VOLCANO.r * 0.6) continue;
+    if (nearestTree(x, z, 10) || Math.hypot(x - VOLCANO.x, z - VOLCANO.z) < VOLCANO.r * 0.6 || inCanyonWall(x, z)) continue;
     const y = terrainHeight(x, z), s = rand(6, 16);
     d.position.set(x, y + s * 0.35, z); d.scale.set(s, s * 0.7, s * rand(0.8, 1.3)); d.rotation.set(rand(0, 1), rand(0, TAU), rand(0, 1)); d.updateMatrix();
     mesh.setMatrixAt(k++, d.matrix);
@@ -725,6 +778,32 @@ function buildRocks() {
   mesh.count = k; scene.add(mesh);
 }
 buildRocks();
+
+// slabs and spires stuck out of the canyon walls, so it reads as rock not mud
+function buildCanyonRock() {
+  const g = new THREE.DodecahedronGeometry(1, 0), m = matL(0x8d6a49, { flatShading: true });
+  const N = LOW ? 130 : 300;
+  const mesh = new THREE.InstancedMesh(g, m, N); mesh.castShadow = !LOW;
+  const d = new THREE.Object3D(); let k = 0;
+  for (let i = 0; i < N * 8 && k < N; i++) {
+    const x = rand(CANYON.x0 - 120, CANYON.x1 + 80);
+    const side = Math.random() < 0.5 ? -1 : 1;
+    const cz = canyonCentre(x);
+    let z = 0, t = 0, ok = false;
+    for (let a = 0; a < 14; a++) { z = cz + side * rand(CANYON.halfW * 0.6, CANYON.halfW + 150); t = canyonMask(x, z); if (t > 0.12 && t < 0.95) { ok = true; break; } }
+    if (!ok) continue;
+    const s = rand(7, 22);
+    z += side * s * 0.35;                                   // bed it into the wall
+    // average over a mesh cell, since the drawn wall is a 26 m chord not the exact curve
+    const y = (terrainHeight(x, z) + terrainHeight(x + 14, z) + terrainHeight(x - 14, z) + terrainHeight(x, z + 16) + terrainHeight(x, z - 16)) / 5;
+    d.position.set(x, y - s * 0.15, z);
+    d.scale.set(s * rand(0.7, 1.4), s * rand(0.9, 2.1), s * rand(0.6, 1.1));
+    d.rotation.set(rand(-0.5, 0.5), rand(0, TAU), side * rand(0.1, 0.6));
+    d.updateMatrix(); mesh.setMatrixAt(k++, d.matrix);
+  }
+  mesh.count = k; scene.add(mesh);
+}
+buildCanyonRock();
 
 /* ---- bridges ---- */
 function buildBridges() {
@@ -822,8 +901,6 @@ const lifts = [];
   });
   scene.add(gm, rm);
 }
-
-Math.random = REAL_RANDOM;   // world is built — back to real randomness for gameplay
 
 /* ============================================================
    MODELS
@@ -1162,7 +1239,6 @@ function resolveGround(pos, radius, bpad) {
 /* ============================================================
    VEHICLES
    ============================================================ */
-let nextVid = 1, nextSid = 1;
 function makeVehicle(kind, team, x, z, yaw = 0, opts = {}) {
   const model = kind === 'plane' ? makeJetModel() : kind === 'tank' ? makeTankModel(team) : kind === 'truck' ? makeTruckModel(team) : makeAAModel(team);
   model.scale.setScalar(kind === 'plane' ? CFG.jetScale : CFG.enemyScale);
@@ -1179,8 +1255,6 @@ function makeVehicle(kind, team, x, z, yaw = 0, opts = {}) {
     cooldown: rand(0.5, 2), wp: null, wpTimer: 0, city: null, spot: null, avoid: 0, sector: opts.sector ?? -1, home: new THREE.Vector3(x, 0, z), attack: false,
     moveSpeed: kind === 'truck' ? 34 : kind === 'tank' ? 22 : 11, turnSpeed: kind === 'truck' ? 1.6 : 1.0,
   };
-  v.id = opts.id ?? nextVid++; if (v.id >= nextVid) nextVid = v.id + 1;
-  v.owner = null; v.net = { x: x, z: z, yaw, turret: 0 };
   if (kind === 'plane') { model.userData.flame.scale.setScalar(0.35); model.userData.gear.visible = true; }
   vehicles.push(v);
   return v;
@@ -1196,7 +1270,7 @@ function updateBarns(dt) {
     if (occupied) { s.timer = 0; continue; }
     const blocked = vehicles.some(v => v.alive && Math.hypot(v.pos.x - s.x, v.pos.z - s.z) < 22) || (P.mode !== 'vehicle' && Math.hypot(P.pos.x - s.x, P.pos.z - s.z) < 14);
     s.timer += dt;
-    if (s.timer >= 10 && !blocked) { s.timer = 0; const v = makeVehicle(s.kind, 'blue', s.x, s.z, s.yaw); puff(v.pos.clone().add(_v.set(0, 4, 0)), 6, 0xffffff, 0.8, 8); if (NET.on) NET.send({ t: 'spawnv', id: v.id, kind: s.kind, x: s.x, z: s.z, yaw: s.yaw }); }
+    if (s.timer >= 10 && !blocked) { s.timer = 0; const v = makeVehicle(s.kind, 'blue', s.x, s.z, s.yaw); puff(v.pos.clone().add(_v.set(0, 4, 0)), 6, 0xffffff, 0.8, 8); }
   }
 }
 function stockBarns() { for (const b of barns) for (const s of b.slots) makeVehicle(s.kind, 'blue', s.x, s.z, s.yaw); }
@@ -1212,6 +1286,7 @@ function spawnGarrison(si) {
       if (si === 1 && inCity(x, z, 80)) continue;
       if (Math.hypot(x - VOLCANO.x, z - VOLCANO.z) < VOLCANO.r + 100) continue;
       if (Math.hypot(x - SIDE_MTN.x, z - SIDE_MTN.z) < SIDE_MTN.r) continue;
+      if (inCanyonWall(x, z)) continue;
       if (nearestTree(x, z, 16) || buildingHit(_v.set(x, groundAt(x, z) + 2, z), 12)) continue;
       return [x, z];
     }
@@ -1251,51 +1326,34 @@ function spawnGarrison(si) {
 /* ============================================================
    SOLDIERS
    ============================================================ */
-function spawnSoldier(x, z, sector = -1, id = null) {
+function spawnSoldier(x, z, sector = -1) {
   const root = makeSoldierModel();
   root.position.set(x, groundAt(x, z), z); root.rotation.y = rand(0, TAU);
   scene.add(root);
-  const sd = { id: id ?? nextSid++, root, pos: root.position, hp: 80, alive: true, cd: rand(0.5, 1.5), home: new THREE.Vector3(x, 0, z), wp: null, wpT: 0, deadT: 0, sector, net: { x, z, yaw: root.rotation.y } };
-  if (sd.id >= nextSid) nextSid = sd.id + 1;
-  soldiers.push(sd);
-  return sd;
+  soldiers.push({ root, pos: root.position, hp: 80, alive: true, cd: rand(0.5, 1.5), home: new THREE.Vector3(x, 0, z), wp: null, wpT: 0, deadT: 0, sector });
 }
-function killSoldier(s, fromNet = false) {
+function killSoldier(s) {
   if (!s.alive) return;
-  if (NET.on && !fromNet) NET.send({ t: NET.isHost ? 'kills' : 'dmgs', sid: s.id });
-  s.alive = false; s.deadT = 0; if (!fromNet) G.stats.soldierKills++;
+  s.alive = false; s.deadT = 0; G.stats.soldierKills++;
   s.root.rotation.x = -Math.PI / 2; s.root.position.y += 0.6;
   puff(s.pos, 1.2, 0xb03030, 0.5, 3);
 }
-// every player the bots can see: you plus everyone in the room
-function playerList() {
-  const out = [];
-  if (P.alive && (P.mode === 'foot' || P.mode === 'vehicle')) out.push({ id: 'me', pos: P.mode === 'vehicle' && P.veh ? P.veh.pos : P.pos, foot: P.mode === 'foot', veh: P.mode === 'vehicle' ? P.veh : null });
-  if (NET.on) for (const pr of NET.peers.values()) if (pr.alive && (pr.mode === 'foot' || pr.mode === 'vehicle')) out.push({ id: pr.id, pos: pr.mode === 'vehicle' && pr.veh ? pr.veh.pos : pr.pos, foot: pr.mode === 'foot', veh: pr.mode === 'vehicle' ? pr.veh : null });
-  return out;
-}
-function hitPlayer(pid, amount) { if (pid === 'me') hurtPlayer(amount); else NET.send({ t: 'hit', to: pid, a: amount }); }
-
 function updateSoldiers(dt) {
-  const players = playerList().filter(p => p.foot);
+  const onFoot = P.mode === 'foot' && P.alive;
   for (let i = soldiers.length - 1; i >= 0; i--) {
     const s = soldiers[i];
     if (!s.alive) { s.deadT += dt; if (s.deadT > 12) { scene.remove(s.root); soldiers.splice(i, 1); } continue; }
     if (s.cine) continue;
-    if (NET.on && !NET.isHost) { s.pos.x = lerp(s.pos.x, s.net.x, 1 - Math.pow(0.001, dt)); s.pos.z = lerp(s.pos.z, s.net.z, 1 - Math.pow(0.001, dt)); s.pos.y = groundAt(s.pos.x, s.pos.z); s.root.rotation.y = s.net.yaw; continue; }
-    let tgt = null, dPlayer = 210;
-    for (const pl of players) { const d = s.pos.distanceTo(pl.pos); if (d < dPlayer) { dPlayer = d; tgt = pl; } }
-    if (tgt) {
-      const tp = tgt.pos;
-      s.root.rotation.y = Math.atan2(-(tp.x - s.pos.x), -(tp.z - s.pos.z));
+    const dPlayer = onFoot ? s.pos.distanceTo(P.pos) : 1e9;
+    if (dPlayer < 210) {
+      s.root.rotation.y = Math.atan2(-(P.pos.x - s.pos.x), -(P.pos.z - s.pos.z));
       s.cd -= dt;
       if (s.cd <= 0) {
         s.cd = 1.0;
         _v.copy(s.pos).setY(s.pos.y + 2.4);
-        if (!hasLOS(_v, _l.copy(tp).setY(tp.y + 2.5))) continue;
-        tracer(_v, tp.clone().setY(tp.y + 2.5));
-        if (NET.on) NET.send({ t: 'tr', a: [_v.x, _v.y, _v.z], b: [tp.x, tp.y + 2.5, tp.z] });
-        if (Math.random() < DIFF.infHit) hitPlayer(tgt.id, DIFF.infDmg);
+        if (!hasLOS(_v, _l.copy(P.pos).setY(P.pos.y + 2.5))) continue;
+        tracer(_v, P.pos.clone().setY(P.pos.y + 2.5));
+        if (Math.random() < DIFF.infHit) hurtPlayer(DIFF.infDmg);
       }
     } else {
       s.wpT -= dt;
@@ -1315,37 +1373,24 @@ function underFire() {
   const v = P.veh;
   showMsg(v && v.kind === 'plane' && v.airborne ? 'UNDER FIRE — climb above 500 or get out of range' : 'UNDER FIRE — get behind cover or out of range', 2.2);
 }
-function damageVehicle(v, amount, at, fromNet = false) {
+function damageVehicle(v, amount, at) {
   if (!v.alive) return;
-  if (NET.on && !fromNet) {
-    if (v.team === 'red') {
-      if (!NET.isHost) { NET.send({ t: 'dmg', vid: v.id, a: amount }); v.hp -= amount; puff(at || v.pos, 1.6, 0xffb46b, 0.35, 4); if (v.hp <= 0) { killVehicleLocal(v); G.stats.vehicleKills++; } return; }
-    } else if (v !== P.veh) {
-      if (v.owner != null) { NET.send({ t: 'vhit', vid: v.id, a: amount, to: v.owner }); return; }
-      if (!NET.isHost) { NET.send({ t: 'dmg', vid: v.id, a: amount }); return; }
-    }
-  }
   v.hp -= amount; v.lastHit = G.time;
   if (v === P.veh) underFire();
   if (v.hp > 0) { puff(at || v.pos, 1.6, 0xffb46b, 0.35, 4); return; }
-  killVehicleLocal(v);
-  if (v.team === 'red') { if (!fromNet) G.stats.vehicleKills++; if (NET.isHost || !NET.on) checkFront(); }
-  else { if (v.kind === 'plane') G.stats.planesLost++; if (v.kind === 'tank') G.stats.tanksLost++; }
-  if (NET.on) NET.send({ t: 'kill', vid: v.id });
-  if (P.veh === v) die(v.kind === 'plane' && v.airborne ? 'SHOT DOWN' : 'DESTROYED');
-}
-function killVehicleLocal(v) {
-  if (!v.alive) return;
-  v.hp = 0; v.alive = false; v.occupied = false; v.owner = null;
+  v.hp = 0; v.alive = false; v.occupied = false;
   explode(v.pos, v.kind === 'plane' ? 1.6 : 1.1, true); noiseBurst(0.6, 0.2);
   wreck(v);
   if (v.towedBy) { const t = v.towedBy; t.tow = t.tow.filter(x => x !== v); v.towedBy = null; }
   if (v.tow.length) { for (const t of v.tow) t.towedBy = null; v.tow = []; }
+  if (v.team === 'red') { G.stats.vehicleKills++; checkFront(); }
+  else { if (v.kind === 'plane') G.stats.planesLost++; if (v.kind === 'tank') G.stats.tanksLost++; }
+  if (P.veh === v) die(v.kind === 'plane' && v.airborne ? 'SHOT DOWN' : 'DESTROYED');
 }
 function splash(pos, radius, amount) {
   for (const v of vehicles) { if (!v.alive) continue; const d = v.pos.distanceTo(pos); if (d < radius + v.hitR * 0.5) damageVehicle(v, amount * (1 - Math.max(0, d - v.hitR * 0.5) / radius) + 10, v.pos); }
   for (const s of soldiers) if (s.alive && s.pos.distanceTo(pos) < radius * 0.7 + 4) killSoldier(s);
-  for (const pl of playerList()) if (pl.foot && pl.pos.distanceTo(pos) < radius * 0.6 + 4) hitPlayer(pl.id, 70);
+  if (P.mode === 'foot' && P.alive && P.pos.distanceTo(pos) < radius * 0.6 + 4) hurtPlayer(70);
 }
 const flashEl = document.getElementById('flash'), fadeEl = document.getElementById('fade');
 function hurtPlayer(n) {
@@ -1432,7 +1477,6 @@ function updateFoot(dt) {
     camera.getWorldDirection(_v); _v2.copy(camera.position);
     const to = _v3.copy(_v2).addScaledVector(_v, 260);
     tracer(_v2.clone().addScaledVector(_v, 3).add(new THREE.Vector3(0, -0.6, 0)), to.clone());
-    if (NET.on) NET.send({ t: 'tr', a: [_v2.x + _v.x * 3, _v2.y - 0.6, _v2.z + _v.z * 3], b: [to.x, to.y, to.z] });
     let hit = false;
     for (const s of soldiers) {
       if (!s.alive) continue;
@@ -1476,8 +1520,7 @@ function updateLift(dt) {
   }
 }
 function enterVehicle(v) {
-  v.occupied = true; v.owner = 'me'; P.veh = v; P.mode = 'vehicle';
-  if (NET.on) NET.send({ t: 'enter', vid: v.id });
+  v.occupied = true; P.veh = v; P.mode = 'vehicle';
   if (v.kind === 'plane') fwd.set(0, 0, -1).applyQuaternion(v.root.quaternion);
   showMsg(v.kind === 'plane' ? 'SHIFT TO THROTTLE UP · W TO LIFT OFF' : v.kind === 'aa' ? 'ARROWS AIM · F FIRE' : v.kind === 'truck' ? 'W/S DRIVE · A/D STEER · T TO TOW A TANK' : 'W/S DRIVE · A/D STEER · ARROWS TURRET · F FIRE', 2.5);
   setCameraMode();
@@ -1486,8 +1529,7 @@ function exitVehicle() {
   const v = P.veh;
   if (v.kind === 'plane' && (v.airborne || v.speed > 15)) { showMsg(v.airborne ? 'LAND FIRST' : 'STOP FIRST', 0.8); return; }
   if ((v.kind === 'tank' || v.kind === 'truck') && Math.abs(v.vel) > 6) { showMsg('STOP FIRST', 0.8); return; }
-  v.occupied = false; v.owner = null;
-  if (NET.on) NET.send({ t: 'exit', vid: v.id, x: v.pos.x, z: v.pos.z, yaw: v.root.rotation.y, tow: v.tow.map(t => t.id) });
+  v.occupied = false;
   const yaw = v.kind === 'plane' ? Math.atan2(-fwd.x, -fwd.z) : v.root.rotation.y;
   P.pos.copy(v.pos).add(_v.set(Math.cos(yaw), 0, -Math.sin(yaw)).multiplyScalar(v.kind === 'plane' ? 22 : 16));
   P.pos.y = v.onRoof ? v.pos.y : groundAt(P.pos.x, P.pos.z);
@@ -1561,9 +1603,8 @@ function updatePlanePlayer(v, dt) {
 }
 function crashPlane(v, reason = 'CRASHED') {
   explode(v.pos, 3.0, true); noiseBurst(1.0, 0.3);
-  killVehicleLocal(v);
+  v.hp = 0; v.alive = false; v.occupied = false; wreck(v);
   if (v.team === 'blue') G.stats.planesLost++;
-  if (NET.on) NET.send({ t: 'kill', vid: v.id, boom: 1 });
   if (P.veh === v) die(reason);
 }
 function exhaust(v, dt, boost) {
@@ -1634,7 +1675,6 @@ function hookTank(truck) {
 function updateTow(dt) {
   for (const truck of vehicles) {
     if (!truck.tow.length) continue;
-    if (NET.on && truck.owner != null && truck.owner !== 'me') continue;
     if (!truck.alive) { for (const t of truck.tow) t.towedBy = null; truck.tow = []; continue; }
     let lead = truck;
     for (const t of truck.tow) {
@@ -1673,7 +1713,7 @@ function shellImpact(v, out) {
   return false;
 }
 const shellG = new THREE.SphereGeometry(0.9, 6, 5), shellM = new THREE.MeshBasicMaterial({ color: 0x333333 });
-function fireShell(v, team, visual = false) {
+function fireShell(v, team) {
   const yaw = v.root.rotation.y + v.turret;
   const dir = _v.set(-Math.sin(yaw), 0, -Math.cos(yaw)); dir.y = Math.tan(v.elev); dir.normalize();
   const m = new THREE.Mesh(shellG, shellM);
@@ -1681,8 +1721,7 @@ function fireShell(v, team, visual = false) {
   scene.add(m);
   const vel = dir.clone();
   if (team === 'red') vel.add(_v3.set(rand(-DIFF.spread, DIFF.spread), rand(-DIFF.spread, DIFF.spread), rand(-DIFF.spread, DIFF.spread))).normalize();
-  shells.push({ mesh: m, vel: vel.multiplyScalar(270), team, life: 6, visual: !!visual });
-  if (NET.on && !visual) NET.send({ t: 'sh', p: [m.position.x, m.position.y, m.position.z], v: [vel.x, vel.y, vel.z], team });
+  shells.push({ mesh: m, vel: vel.multiplyScalar(270), team, life: 6 });
   puff(m.position.clone(), 2.5, 0xffc060, 0.25, 6);
   noiseBurst(0.25, 0.2); beep(80, 0.25, 'square', 0.1, 0.4);
 }
@@ -1692,10 +1731,10 @@ function updateShells(dt) {
     s.life -= dt; s.vel.y -= 55 * dt; s.mesh.position.addScaledVector(s.vel, dt);
     const p = s.mesh.position;
     let hit = false;
-    for (const v of vehicles) { if (!v.alive || v.team === s.team) continue; if (p.distanceTo(v.pos) < v.hitR + 3) { if (!s.visual) damageVehicle(v, 45, p); hit = true; break; } }
-    if (!hit && s.team === 'red') for (const pl of playerList()) if (pl.foot && p.distanceTo(pl.pos) < 5) { hit = true; break; }
+    for (const v of vehicles) { if (!v.alive || v.team === s.team) continue; if (p.distanceTo(v.pos) < v.hitR + 3) { damageVehicle(v, 45, p); hit = true; break; } }
+    if (!hit && s.team === 'red' && P.mode === 'foot' && P.alive && p.distanceTo(P.pos) < 5) hit = true;
     if (!hit && (p.y < groundAt(p.x, p.z) || buildingHit(p, 1))) hit = true;
-    if (hit || s.life <= 0) { explode(p, 0.9, false); noiseBurst(0.35, 0.12); if (!s.visual) splash(p, 22, 30); scene.remove(s.mesh); shells.splice(i, 1); }
+    if (hit || s.life <= 0) { explode(p, 0.9, false); noiseBurst(0.35, 0.12); splash(p, 22, 30); scene.remove(s.mesh); shells.splice(i, 1); }
   }
 }
 const bulletG = new THREE.SphereGeometry(0.75, 6, 5), aaBulletM = new THREE.MeshBasicMaterial({ color: 0xff5a3d }), flakM = new THREE.MeshBasicMaterial({ color: 0xffe28a });
@@ -1741,13 +1780,11 @@ function fireMissile(v) {
   let tgt = null, best = CFG.assistCone;
   for (const t of vehicles) { if (!t.alive || t.team !== 'red') continue; _v.copy(t.pos).sub(m.position); const d = _v.length(); if (d > CFG.assistRange) continue; const dot = _v.divideScalar(d).dot(fwd); if (dot > best) { best = dot; tgt = t; } }
   missiles.push({ mesh: m, vel: fwd.clone().multiplyScalar(CFG.missileSpeed), life: CFG.missileLife, trail: 0, target: tgt });
-  if (NET.on) NET.send({ t: 'ms', p: [m.position.x, m.position.y, m.position.z], d: [fwd.x, fwd.y, fwd.z], q: m.quaternion.toArray(), tid: tgt ? tgt.id : -1 });
   beep(620, 0.4, 'sawtooth', 0.09, 0.3); noiseBurst(0.25, 0.08);
   if (v.missiles === 0) { v.reloading = CFG.reloadTime; beep(240, 0.1, 'sine', 0.05); }
 }
-function detonate(pos, visualOnly = false) {
+function detonate(pos) {
   explode(pos, 1.5, true); noiseBurst(0.8, 0.28); beep(90, 0.5, 'square', 0.1, 0.35);
-  if (visualOnly) return;
   for (const t of vehicles) { if (!t.alive || t.team !== 'red') continue; const d = t.pos.distanceTo(pos); if (d < CFG.blastRadius) damageVehicle(t, CFG.blastDamage * (1 - d / CFG.blastRadius) + 60, t.pos); }
   for (const s of soldiers) if (s.alive && s.pos.distanceTo(pos) < CFG.blastRadius * 0.8) killSoldier(s);
   if (P.veh && P.veh.alive && P.veh.pos.distanceTo(pos) < CFG.blastRadius * 0.8) damageVehicle(P.veh, 25, P.veh.pos);
@@ -1763,7 +1800,7 @@ function updateMissiles(dt) {
     for (const t of vehicles) if (t.alive && t.team === 'red' && m.mesh.position.distanceTo(t.pos) < t.hitR + 8) { hit = true; break; }
     const p = m.mesh.position;
     if (!hit && (p.y < groundAt(p.x, p.z) || buildingHit(p, 2))) hit = true;
-    if (hit) detonate(p, !!m.visual);
+    if (hit) detonate(p);
     if (hit || m.life <= 0) { scene.remove(m.mesh); missiles.splice(i, 1); }
   }
 }
@@ -1814,30 +1851,16 @@ function driveEnemy(v, dt, halt) {
   p.y = groundAt(p.x, p.z);
 }
 function updateEnemies(dt) {
-  if (NET.on && !NET.isHost) {   // not the host: just glide enemies to where the host says they are
-    const k = 1 - Math.pow(0.001, dt);
-    for (const v of vehicles) {
-      if (v.team !== 'red' || !v.alive) continue;
-      v.pos.x = lerp(v.pos.x, v.net.x, k); v.pos.z = lerp(v.pos.z, v.net.z, k);
-      if (!v.onRoof) v.pos.y = groundAt(v.pos.x, v.pos.z);
-      let d = v.net.yaw - v.root.rotation.y; d = Math.atan2(Math.sin(d), Math.cos(d)); v.root.rotation.y += d * k;
-      const tur = v.model.userData.turret; if (tur) tur.rotation.y = lerp(tur.rotation.y, v.net.turret, k);
-    }
-    return;
-  }
-  const players = playerList();
-  const planes = players.filter(p => p.veh && p.veh.kind === 'plane' && p.veh.airborne).map(p => p.veh);
+  const playerPlane = P.veh && P.veh.kind === 'plane' && P.veh.airborne ? P.veh : null;
   for (const v of vehicles) {
     if (!v.alive || v.team !== 'red') continue;
     const turret = v.model.userData.turret;
     let tgt = null, td = 1e9;
     if (v.kind === 'tank') {
       const consider = (pos, d) => { if (d < td) { td = d; tgt = pos; } };
-      for (const pl of players) if (pl.foot) consider(pl.pos, v.pos.distanceTo(pl.pos));
+      if (P.mode === 'foot' && P.alive) consider(P.pos, v.pos.distanceTo(P.pos));
       for (const b of vehicles) if (b.alive && b.team === 'blue' && !(b.kind === 'plane' && b.airborne) && (b.occupied || b.towedBy || b.pos.x > RIVER.x0 - 200)) consider(b.pos, v.pos.distanceTo(b.pos));
     }
-    let playerPlane = null, pd = 1e9;
-    for (const pl of planes) { const d = v.pos.distanceTo(pl.pos); if (d < pd) { pd = d; playerPlane = pl; } }
     const engaging = v.kind === 'tank' && tgt && td < DIFF.tankRange;
     if (v.kind !== 'aa') driveEnemy(v, dt, engaging);
     if (v.kind === 'tank' && turret && tgt && td < 700) {
@@ -1863,7 +1886,7 @@ function updateEnemies(dt) {
           if (!hasLOS(_v3.copy(v.pos).setY(v.pos.y + 8), playerPlane.pos)) continue;
           v.cooldown = CFG.aaCooldown;
           const travel = dist / CFG.aaBulletSpeed;
-          _v.copy(playerPlane.pos).addScaledVector(playerPlane === P.veh ? fwd : _v2.set(0, 0, -1).applyQuaternion(playerPlane.root.quaternion), playerPlane.speed * travel).sub(v.pos).normalize();
+          _v.copy(playerPlane.pos).addScaledVector(fwd, playerPlane.speed * travel).sub(v.pos).normalize();
           for (let k = 0; k < 3; k++) {
             const b = new THREE.Mesh(bulletG, aaBulletM); b.position.copy(v.pos).addScaledVector(_v, 8); b.scale.setScalar(1.8); scene.add(b);
             const dir = _v.clone().add(_v2.set(rand(-0.035, 0.035), rand(-0.035, 0.035), rand(-0.035, 0.035))).normalize();
@@ -1875,11 +1898,11 @@ function updateEnemies(dt) {
   }
 }
 function updateAABullets(dt) {
-  const planes = playerList().filter(p => p.veh && p.veh.kind === 'plane').map(p => p.veh);
+  const pv = P.veh;
   for (let i = aaBullets.length - 1; i >= 0; i--) {
     const b = aaBullets[i]; b.life -= dt; b.vel.y -= 16 * dt; b.mesh.position.addScaledVector(b.vel, dt);
     let gone = b.life <= 0;
-    if (!gone) for (const pv of planes) if (pv.alive && b.mesh.position.distanceTo(pv.pos) < CFG.playerHitR) { damageVehicle(pv, CFG.aaDamage, b.mesh.position); puff(b.mesh.position, 1.8, 0xff8844, 0.4, 5); if (pv === P.veh) { flashEl.style.opacity = 1; setTimeout(() => flashEl.style.opacity = 0, 90); } gone = true; break; }
+    if (!gone && pv && pv.alive && b.mesh.position.distanceTo(pv.pos) < CFG.playerHitR) { damageVehicle(pv, CFG.aaDamage, b.mesh.position); puff(b.mesh.position, 1.8, 0xff8844, 0.4, 5); flashEl.style.opacity = 1; setTimeout(() => flashEl.style.opacity = 0, 90); gone = true; }
     if (!gone && b.mesh.position.y < terrainHeight(b.mesh.position.x, b.mesh.position.z)) gone = true;
     if (gone) { scene.remove(b.mesh); aaBullets.splice(i, 1); }
   }
@@ -1888,11 +1911,6 @@ function updateAABullets(dt) {
 /* ---- the front line ---- */
 function sectorAlive(si) { return vehicles.filter(v => v.team === 'red' && v.alive && v.sector === si).length; }
 function checkFront() {
-  const before = G.front;
-  _checkFront();
-  if (NET.on && NET.isHost && (G.front !== before || G.finalReady)) NET.send({ t: 'front', front: G.front, ready: !!G.finalReady });
-}
-function _checkFront() {
   while (G.front < 3 && sectorAlive(G.front) === 0) {
     const cleared = G.front; G.front++;
     if (cleared === 1) for (const v of vehicles) if (v.kind === 'aa' && v.onRoof && v.alive) { v.team = 'blue'; v.occupied = false; }   // captured city guns are yours
@@ -1924,17 +1942,13 @@ function updateAttackers(dt) {
 let cine = null;
 function updateFinale(dt) {
   if (!G.finalReady || cine || G.won) return;
-  if (NET.on && !NET.isHost) return;
-  for (const pl of playerList()) if (Math.hypot(pl.pos.x - VOLCANO.x, pl.pos.z - VOLCANO.z) < 520 && pl.pos.y > 300) { startFinale(); break; }
+  const me = P.mode === 'vehicle' && P.veh ? P.veh.pos : P.pos;
+  if (Math.hypot(me.x - VOLCANO.x, me.z - VOLCANO.z) < 520 && me.y > 300) startFinale();
 }
-function startFinale(fromNet = false) {
-  if (cine) return;
-  if (NET.on && !fromNet) NET.send({ t: 'finale' });
-  // everyone watches from the same spot on the west rim
-  const rimX = VOLCANO.x - VOLCANO.crater - 120, rimZ = VOLCANO.z + 60;
-  cine = { t: 0, walkers: [], erupted: false, camPos: new THREE.Vector3(rimX, terrainHeight(rimX, rimZ) + 14, rimZ), look: new THREE.Vector3(VOLCANO.x, terrainHeight(VOLCANO.x, VOLCANO.z) + 120, VOLCANO.z) };
+function startFinale() {
+  if (P.veh && P.veh.kind === 'plane' && P.veh.airborne) { /* freeze the plane in place */ }
+  cine = { t: 0, walkers: [], erupted: false, camPos: camera.position.clone(), look: new THREE.Vector3(VOLCANO.x, terrainHeight(VOLCANO.x, VOLCANO.z) + 120, VOLCANO.z) };
   P.mode = 'cine';
-  seedRandom(777);
   // the last of them, backing away from you on the rim
   const rimR = VOLCANO.crater + 40;
   const dirToMe = Math.atan2(cine.camPos.z - VOLCANO.z, cine.camPos.x - VOLCANO.x);
@@ -1945,7 +1959,6 @@ function startFinale(fromNet = false) {
     cine.walkers.push(s);
   }
   showMsg('THEY\'VE GOT NOWHERE LEFT TO GO', 3);
-  Math.random = REAL_RANDOM;
 }
 function tickFinale(dt) {
   cine.t += dt;
@@ -1971,14 +1984,9 @@ function tickFinale(dt) {
   if (cine.t > 11 && !G.won) { G.won = true; showStats(); }
 }
 function showStats() {
-  const m = Math.floor(G.time / 60), sec = Math.floor(G.time % 60);
-  const people = [{ name: USER.name, st: G.stats }];
-  if (NET.on) for (const pr of NET.peers.values()) people.push({ name: pr.name, st: pr.stats || {} });
-  const cols = [['VEHICLES', 'vehicleKills'], ['SOLDIERS', 'soldierKills'], ['SHOTS', 'shots'], ['DEATHS', 'deaths'], ['PLANES LOST', 'planesLost'], ['TANKS LOST', 'tanksLost']];
-  let html = '<tr><td>TIME</td><td>' + m + 'm ' + sec + 's</td></tr>';
-  html += '<tr><td>PLAYER</td><td style="text-align:right">' + cols.map(c => c[0]).join(' · ') + '</td></tr>';
-  for (const p of people) html += '<tr><td>' + p.name + '</td><td>' + cols.map(c => p.st[c[1]] || 0).join(' · ') + '</td></tr>';
-  document.getElementById('statsTable').innerHTML = html;
+  const s = G.stats, m = Math.floor(G.time / 60), sec = Math.floor(G.time % 60);
+  const rows = [['TIME', m + 'm ' + sec + 's'], ['ENEMY VEHICLES DESTROYED', s.vehicleKills], ['ENEMY SOLDIERS', s.soldierKills], ['SHOTS FIRED', s.shots], ['DEATHS', s.deaths], ['PLANES LOST', s.planesLost], ['TANKS LOST', s.tanksLost]];
+  document.getElementById('statsTable').innerHTML = rows.map(r => '<tr><td>' + r[0] + '</td><td>' + r[1] + '</td></tr>').join('');
   document.getElementById('stats').classList.remove('hidden');
   document.exitPointerLock?.();
 }
@@ -2084,11 +2092,6 @@ function updateHUD(dt) {
   if (v && v.kind === 'truck' && v.tow.length) { towEl.style.display = 'block'; towEl.textContent = 'TOWING ' + v.tow.length; } else towEl.style.display = 'none';
 
   if (G.msgTimer > 0) { G.msgTimer -= dt; if (G.msgTimer <= 0) msgEl.style.opacity = 0; }
-  if (NET.on) {
-    let r = (NET.connected ? '● ' : '○ ') + 'ROOM ' + NET.room + (NET.isHost ? ' (host)' : '') + '<br>';
-    for (const pr of NET.peers.values()) r += (pr.alive ? '● ' : '○ ') + pr.name + '<br>';
-    el('roster').innerHTML = r;
-  }
   drawRadar();
 }
 function drawRadar() {
@@ -2102,6 +2105,10 @@ function drawRadar() {
   rctx.fillStyle = 'rgba(70,140,200,.6)'; rctx.fillRect(px(RIVER.x0), 0, (RIVER.x1 - RIVER.x0) * sc, W);
   rctx.fillStyle = 'rgba(200,200,200,.8)'; for (const b of BRIDGES) rctx.fillRect(px(b.x0), pz(b.z) - 2, (b.x1 - b.x0) * sc, 4);
   rctx.fillStyle = 'rgba(160,170,180,.5)'; rctx.beginPath(); rctx.arc(px(CITY.x), pz(CITY.z), CITY.r * sc, 0, TAU); rctx.fill();
+  // canyon
+  rctx.strokeStyle = 'rgba(150,110,70,.75)'; rctx.lineWidth = Math.max(2, 210 * sc); rctx.beginPath();
+  for (let i = 0; i <= 40; i++) { const x = lerp(CANYON.x0, CANYON.x1, i / 40); const y = pz(canyonCentre(x)); i ? rctx.lineTo(px(x), y) : rctx.moveTo(px(x), y); }
+  rctx.stroke(); rctx.lineWidth = 1;
   rctx.fillStyle = 'rgba(255,90,20,.6)'; rctx.beginPath(); rctx.arc(px(VOLCANO.x), pz(VOLCANO.z), VOLCANO.r * sc, 0, TAU); rctx.fill();
   // front line
   if (G.front < 3) { rctx.strokeStyle = 'rgba(255,60,60,.8)'; rctx.lineWidth = 2; rctx.setLineDash([6, 4]); rctx.beginPath(); rctx.moveTo(px(SECTORS[G.front].x0), 0); rctx.lineTo(px(SECTORS[G.front].x0), W); rctx.stroke(); rctx.setLineDash([]); }
@@ -2113,7 +2120,6 @@ function drawRadar() {
   }
   rctx.fillStyle = '#ff8080'; for (const s of soldiers) { if (!s.alive) continue; const x = px(s.pos.x), y = pz(s.pos.z); if (x < 0 || x > W || y < 0 || y > W) continue; rctx.fillRect(x - 1.5, y - 1.5, 3, 3); }
   for (const f of ferries) { rctx.fillStyle = '#ffd23f'; rctx.fillRect(px(f.x) - 4, pz(f.z) - 3, 8, 6); }
-  if (NET.on) for (const pr of NET.peers.values()) { if (!pr.alive) continue; const pp = pr.mode === 'vehicle' && pr.veh ? pr.veh.pos : pr.pos; const x = px(pp.x), y = pz(pp.z); if (x < 0 || x > W || y < 0 || y > W) continue; rctx.fillStyle = '#8ff0a4'; rctx.beginPath(); rctx.arc(x, y, 4, 0, TAU); rctx.fill(); }
   // you + heading
   camera.getWorldDirection(_v);
   rctx.fillStyle = '#8ff0a4'; rctx.save(); rctx.translate(W / 2, W / 2); rctx.rotate(Math.atan2(_v.x, -_v.z));
@@ -2122,206 +2128,13 @@ function drawRadar() {
 }
 
 /* ============================================================
-   NETWORK — one relay room, host runs the bots, everyone owns what they're sitting in
-   ============================================================ */
-let RELAY = 'wss://jetstrike-rooms.matchweek1.workers.dev/room/';
-try { const r = new URLSearchParams(location.search).get('relay'); if (r) RELAY = r; } catch (e) {}
-const NET = { on: false, room: null, ws: null, id: null, isHost: false, peers: new Map(), ready: false, sendT: 0, syncT: 0, connected: false, retry: 0 };
-try { const r = new URLSearchParams(location.search).get('room'); if (r) NET.room = r.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 8); } catch (e) {}
-NET.on = !!NET.room;
-
-const labelCache = new Map();
-function makeLabel(text) {
-  const c = document.createElement('canvas'); c.width = 256; c.height = 64;
-  const x = c.getContext('2d');
-  x.font = '900 34px "Arial Black", Arial'; x.textAlign = 'center'; x.textBaseline = 'middle';
-  x.lineWidth = 6; x.strokeStyle = 'rgba(0,0,0,.8)'; x.strokeText(text, 128, 32);
-  x.fillStyle = '#8ff0a4'; x.fillText(text, 128, 32);
-  const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace;
-  const sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: t, depthTest: false, transparent: true }));
-  sp.scale.set(24, 6, 1); sp.renderOrder = 999;
-  return sp;
-}
-function makePeer(id, name) {
-  const root = makeSoldierModel();
-  root.traverse(o => { if (o.isMesh && o.material && o.material.color && o.material.color.getHex() === 0x5a5b3c) o.material = mat(0x4c6a8a); });
-  scene.add(root);
-  const label = makeLabel(name || ('PLAYER ' + id)); scene.add(label);
-  const pr = { id, name: name || ('PLAYER ' + id), root, pos: root.position, tx: 0, tz: 0, ty: 0, yaw: 0, mode: 'foot', alive: false, veh: null, label, seen: 0, stats: {} };
-  NET.peers.set(id, pr);
-  return pr;
-}
-function removePeer(id) {
-  const pr = NET.peers.get(id); if (!pr) return;
-  if (pr.veh) { pr.veh.occupied = false; pr.veh.owner = null; }
-  scene.remove(pr.root, pr.label); NET.peers.delete(id);
-}
-function vehById(id) { return vehicles.find(v => v.id === id); }
-function soldierById(id) { return soldiers.find(s => s.id === id); }
-
-NET.send = (obj) => { if (NET.ws && NET.ws.readyState === 1) { obj.from = NET.id; NET.ws.send(JSON.stringify(obj)); } };
-NET.connect = () => {
-  if (!NET.on) return;
-  showMsg('CONNECTING TO ROOM ' + NET.room + '…', 4);
-  const ws = new WebSocket(RELAY + NET.room);
-  NET.ws = ws;
-  ws.onopen = () => { NET.connected = true; NET.retry = 0; };
-  ws.onclose = () => { NET.connected = false; showMsg('LOST THE ROOM — reconnecting', 3); setTimeout(NET.connect, 2000 + Math.min(NET.retry++ * 1000, 6000)); };
-  ws.onerror = () => {};
-  ws.onmessage = ev => { let m; try { m = JSON.parse(ev.data); } catch (e) { return; } onNet(m); };
-};
-function electHost() {
-  const ids = [NET.id, ...NET.peers.keys()].filter(x => x != null);
-  const low = Math.min(...ids);
-  const was = NET.isHost;
-  NET.isHost = low === NET.id;
-  if (NET.isHost && !was && NET.ready) showMsg('YOU ARE NOW RUNNING THE BATTLE (host)', 2.5);
-}
-function worldSnapshot() {
-  return {
-    t: 'world', front: G.front, ready: !!G.finalReady, time: G.time, nextVid, nextSid,
-    reds: vehicles.filter(v => v.team === 'red').map(v => ({ id: v.id, kind: v.kind, x: v.pos.x, z: v.pos.z, y: v.onRoof ? v.pos.y : null, yaw: v.root.rotation.y, sector: v.sector, alive: v.alive, hp: v.hp, city: !!v.city, spot: v.spot ? [v.spot.ix, v.spot.iz] : null })),
-    sold: soldiers.filter(s => !s.cine).map(s => ({ id: s.id, x: s.pos.x, z: s.pos.z, alive: s.alive, sector: s.sector })),
-    blues: vehicles.filter(v => v.team === 'blue').map(v => ({ id: v.id, kind: v.kind, x: v.pos.x, z: v.pos.z, y: v.onRoof ? v.pos.y : null, yaw: v.root.rotation.y, alive: v.alive, hp: v.hp, occ: v.occupied, owner: v.owner === 'me' ? NET.id : v.owner })),
-  };
-}
-function applyWorld(m) {
-  // rebuild reds + soldiers exactly as the host has them
-  for (const v of vehicles.slice()) if (v.team === 'red') removeVehicle(v);
-  for (const sd of soldiers) scene.remove(sd.root); soldiers.length = 0;
-  for (const r of m.reds) {
-    const v = makeVehicle(r.kind, 'red', r.x, r.z, r.yaw, { id: r.id, sector: r.sector, y: r.y ?? undefined, roof: r.y != null });
-    v.net.x = r.x; v.net.z = r.z; v.net.yaw = r.yaw; v.hp = r.hp;
-    if (r.city) { v.city = CITY; v.spot = CITY.spots.find(s => s.ix === r.spot[0] && s.iz === r.spot[1]) || CITY.spots[0]; }
-    if (!r.alive) { v.hp = 0; v.alive = false; wreck(v); }
-  }
-  for (const sd of m.sold) { const s = spawnSoldier(sd.x, sd.z, sd.sector, sd.id); if (!sd.alive) { s.alive = false; s.root.rotation.x = -Math.PI / 2; } }
-  for (const b of m.blues) {
-    let v = vehById(b.id);
-    if (!v) v = makeVehicle(b.kind, 'blue', b.x, b.z, b.yaw, { id: b.id, y: b.y ?? undefined, roof: b.y != null });
-    if (v.owner !== 'me') { v.pos.x = b.x; v.pos.z = b.z; if (!v.onRoof) v.pos.y = groundAt(b.x, b.z) + (v.kind === 'plane' ? 2.6 : 0); v.root.rotation.y = b.yaw; v.hp = b.hp; v.occupied = b.occ; v.owner = b.owner == null || b.owner === NET.id ? null : b.owner; }
-    if (!b.alive && v.alive) killVehicleLocal(v);
-  }
-  nextVid = Math.max(nextVid, m.nextVid); nextSid = Math.max(nextSid, m.nextSid);
-  G.front = m.front; G.finalReady = m.ready; G.time = m.time;
-}
-function onNet(m) {
-  if (m.t === 'hello') {
-    NET.id = m.id;
-    for (const pid of m.players) if (pid !== NET.id && !NET.peers.has(pid)) makePeer(pid);
-    electHost();
-    if (NET.isHost) { if (!NET.ready) { NET.ready = true; beginBattle(); } }
-    else if (!NET.ready) { showMsg('JOINING ' + NET.room + ' — waiting for the host…', 6); NET.joinT = 8; }
-    NET.send({ t: 'name', n: USER.name });
-    return;
-  }
-  if (m.t === 'join') { if (!NET.peers.has(m.id)) makePeer(m.id); NET.send({ t: 'name', n: USER.name }); if (NET.isHost && NET.ready) { const w = worldSnapshot(); w.to = m.id; NET.send(w); } return; }
-  if (m.t === 'leave') { removePeer(m.id); electHost(); return; }
-  if (m.to != null && m.to !== NET.id) return;
-  const pr = NET.peers.get(m.from) || (m.from != null ? makePeer(m.from) : null);
-  switch (m.t) {
-    case 'name': if (pr) { pr.name = m.n; scene.remove(pr.label); pr.label = makeLabel(m.n); scene.add(pr.label); } break;
-    case 'world': if (!NET.ready) { applyWorld(m); NET.ready = true; beginBattle(true); } else applyWorld(m); break;
-    case 'p': {
-      if (!pr) break;
-      pr.seen = G.time; pr.name = m.n || pr.name; pr.mode = m.m; pr.alive = m.al; pr.stats = m.st || pr.stats;
-      pr.tx = m.x; pr.ty = m.y; pr.tz = m.z; pr.yaw = m.yaw;
-      if (m.m === 'vehicle' && m.vid != null) {
-        const v = vehById(m.vid);
-        if (v) {
-          if (pr.veh && pr.veh !== v) { pr.veh.occupied = false; pr.veh.owner = null; }
-          pr.veh = v; v.occupied = true; v.owner = pr.id;
-          v.pos.set(m.x, m.y, m.z);
-          if (m.q) v.root.quaternion.fromArray(m.q); else v.root.rotation.set(0, m.yaw, 0);
-          if (m.tur != null) { v.turret = m.tur; const tur = v.model.userData.turret; if (tur) tur.rotation.y = m.tur; }
-          if (m.elev != null) { v.elev = m.elev; if (v.model.userData.barrel) v.model.userData.barrel.rotation.x = Math.PI / 2 + m.elev; if (v.model.userData.barrels) v.model.userData.barrels.rotation.x = -m.elev; }
-          if (v.kind === 'plane') { v.airborne = !!m.air; v.speed = m.sp || 0; v.gear = m.gear !== false; v.model.userData.gear.visible = v.gear; v.model.visible = true; }
-          if (m.tow) for (const tw of m.tow) { const t = vehById(tw[0]); if (t) { t.pos.x = tw[1]; t.pos.z = tw[2]; t.pos.y = groundAt(tw[1], tw[2]); t.root.rotation.y = tw[3]; t.towedBy = v; t.occupied = false; } }
-          if (m.hp != null) v.hp = m.hp;
-        }
-      } else if (pr.veh) { pr.veh.occupied = false; pr.veh.owner = null; pr.veh = null; }
-      break;
-    }
-    case 'enter': { const v = vehById(m.vid); if (v && pr) { v.occupied = true; v.owner = pr.id; pr.veh = v; } break; }
-    case 'exit': { const v = vehById(m.vid); if (v) { v.occupied = false; v.owner = null; v.pos.x = m.x; v.pos.z = m.z; if (!v.onRoof) v.pos.y = groundAt(m.x, m.z) + (v.kind === 'plane' ? 2.6 : 0); v.root.rotation.set(0, m.yaw, 0); if (v.kind === 'plane') v.airborne = false; } if (pr && pr.veh === v) pr.veh = null; break; }
-    case 'spawnv': if (!vehById(m.id)) makeVehicle(m.kind, 'blue', m.x, m.z, m.yaw, { id: m.id }); break;
-    case 'dmg': if (NET.isHost) { const v = vehById(m.vid); if (v) damageVehicle(v, m.a, v.pos, true); } break;
-    case 'vhit': { const v = vehById(m.vid); if (v && v === P.veh) damageVehicle(v, m.a, v.pos, true); break; }
-    case 'kill': { const v = vehById(m.vid); if (v && v.alive) { killVehicleLocal(v); if (v === P.veh) die('DESTROYED'); if (v.team === 'red' && (NET.isHost)) checkFront(); } break; }
-    case 'dmgs': if (NET.isHost) { const sd = soldierById(m.sid); if (sd) killSoldier(sd, true); } break;
-    case 'kills': { const sd = soldierById(m.sid); if (sd) killSoldier(sd, true); break; }
-    case 'hit': hurtPlayer(m.a); break;
-    case 'es': {
-      for (const e of m.v) { const v = vehById(e[0]); if (!v) continue; v.net.x = e[1]; v.net.z = e[2]; v.net.yaw = e[3]; v.net.turret = e[4]; v.hp = e[5]; if (!e[6] && v.alive) killVehicleLocal(v); }
-      for (const e of m.s) { const sd = soldierById(e[0]); if (!sd) continue; sd.net.x = e[1]; sd.net.z = e[2]; sd.net.yaw = e[3]; if (!e[4] && sd.alive) killSoldier(sd, true); }
-      break;
-    }
-    case 'sh': { fireShellVisual(m.p, m.v, m.team); break; }
-    case 'ms': { const mm = makeMissileMesh(); mm.position.fromArray(m.p); mm.quaternion.fromArray(m.q); scene.add(mm); const tgt = m.tid >= 0 ? vehById(m.tid) : null; missiles.push({ mesh: mm, vel: new THREE.Vector3().fromArray(m.d).multiplyScalar(CFG.missileSpeed), life: CFG.missileLife, trail: 0, target: tgt, visual: true }); break; }
-    case 'tr': tracer(new THREE.Vector3().fromArray(m.a), new THREE.Vector3().fromArray(m.b)); break;
-    case 'front': { const before = G.front; G.front = m.front; G.finalReady = m.ready; if (G.front !== before) showMsg(G.front < 3 ? SECTORS[before].name + ' CLEARED — they\'re counter-attacking from ' + SECTORS[G.front].label : 'THE MOUNTAIN IS YOURS — PUSH UP TO THE VOLCANO', 4); if (m.front === 1) for (const v of vehicles) if (v.kind === 'aa' && v.onRoof && v.alive) v.team = 'blue'; break; }
-    case 'finale': startFinale(true); break;
-  }
-}
-function fireShellVisual(p, v, team) {
-  const m = new THREE.Mesh(shellG, shellM); m.position.fromArray(p); scene.add(m);
-  shells.push({ mesh: m, vel: new THREE.Vector3().fromArray(v), team, life: 6, visual: true });
-  puff(m.position.clone(), 2.5, 0xffc060, 0.25, 6);
-}
-function netUpdate(dt) {
-  if (!NET.on) return;
-  if (!NET.ready && NET.joinT != null) { NET.joinT -= dt; if (NET.joinT <= 0) { NET.joinT = null; electHost(); if (NET.isHost) { NET.ready = true; beginBattle(); } else { NET.joinT = 8; NET.send({ t: 'join', id: NET.id }); } } }
-  // glide peers
-  const k = 1 - Math.pow(0.0005, dt);
-  for (const pr of NET.peers.values()) {
-    if (pr.mode === 'vehicle' && pr.veh) { pr.root.visible = false; pr.label.position.copy(pr.veh.pos).add(_v.set(0, pr.veh.kind === 'plane' ? 14 : 16, 0)); pr.label.visible = pr.alive; }
-    else {
-      pr.root.visible = pr.alive && pr.mode === 'foot';
-      pr.pos.x = lerp(pr.pos.x, pr.tx, k); pr.pos.z = lerp(pr.pos.z, pr.tz, k); pr.pos.y = lerp(pr.pos.y, pr.ty, k);
-      pr.root.rotation.y = pr.yaw;
-      pr.label.position.copy(pr.pos).add(_v.set(0, 6, 0)); pr.label.visible = pr.root.visible;
-    }
-    if (G.time - pr.seen > 15 && pr.seen > 0) { pr.alive = false; pr.root.visible = false; pr.label.visible = false; }
-  }
-  if (!NET.ready) return;
-  // my state, 15×/s
-  NET.sendT -= dt;
-  if (NET.sendT <= 0) {
-    NET.sendT = 1 / 15;
-    const v = P.mode === 'vehicle' ? P.veh : null;
-    const msg = { t: 'p', n: USER.name, m: P.mode, al: P.alive, st: G.stats };
-    if (v) {
-      msg.vid = v.id; msg.x = v.pos.x; msg.y = v.pos.y; msg.z = v.pos.z; msg.yaw = v.root.rotation.y; msg.hp = v.hp;
-      if (v.kind === 'plane') { msg.q = v.root.quaternion.toArray().map(n => +n.toFixed(4)); msg.air = v.airborne; msg.sp = v.speed | 0; msg.gear = v.gear; }
-      if (v.kind === 'tank' || v.kind === 'aa') { msg.tur = +v.turret.toFixed(3); msg.elev = +v.elev.toFixed(3); }
-      if (v.tow.length) msg.tow = v.tow.map(t => [t.id, +t.pos.x.toFixed(1), +t.pos.z.toFixed(1), +t.root.rotation.y.toFixed(3)]);
-    } else { msg.x = P.pos.x; msg.y = P.pos.y; msg.z = P.pos.z; msg.yaw = P.yaw; }
-    NET.send(msg);
-  }
-  // host: enemy state 8×/s
-  if (NET.isHost) {
-    NET.syncT -= dt;
-    if (NET.syncT <= 0) {
-      NET.syncT = 1 / 8;
-      NET.send({ t: 'es',
-        v: vehicles.filter(v => v.team === 'red').map(v => [v.id, +v.pos.x.toFixed(1), +v.pos.z.toFixed(1), +v.root.rotation.y.toFixed(3), +((v.model.userData.turret || {}).rotation || { y: 0 }).y.toFixed(3), v.hp | 0, v.alive ? 1 : 0]),
-        s: soldiers.filter(s => !s.cine).map(s => [s.id, +s.pos.x.toFixed(1), +s.pos.z.toFixed(1), +s.root.rotation.y.toFixed(2), s.alive ? 1 : 0]) });
-    }
-  }
-}
-
-/* ============================================================
    FLOW / LOOP
    ============================================================ */
 function startGame() {
-  el('who').textContent = USER.name.toUpperCase() + (EASY ? ' · EASY' : ' · SQUAD') + (NET.on ? ' · ROOM ' + NET.room : '');
+  el('who').textContent = USER.name.toUpperCase() + (EASY ? ' · EASY' : ' · SQUAD');
+  stockBarns();
+  for (let i = 0; i < 3; i++) spawnGarrison(i);
   el('start').classList.add('hidden');
-  if (NET.on) { stockBarns(); G.running = true; NET.connect(); return; }
-  beginBattle();
-}
-// host (or single player): spawn the enemy; joiner: enemies arrive from the host
-function beginBattle(joined = false) {
-  if (!joined) for (let i = 0; i < 3; i++) spawnGarrison(i);
   G.running = true;
   openSpawnMenu(0, false);
   spawnTitle.textContent = 'CHOOSE WHERE TO DEPLOY';
@@ -2336,7 +2149,7 @@ const clock = new THREE.Clock();
 function simulate(dt) {
   updateSpawnMenu(dt);
   if (G.running && !G.paused && !G.won) {
-    updateRegen(dt); updateFerries(dt); if (!NET.on || NET.isHost) { updateBarns(dt); updateAttackers(dt); } updateTow(dt);
+    updateRegen(dt); updateFerries(dt); updateBarns(dt); updateTow(dt); updateAttackers(dt);
     if (P.mode === 'cine') tickFinale(dt);
     else if (!P.alive || spawnOpen) { /* waiting */ }
     else if (P.mode === 'foot') updateFoot(dt);
@@ -2354,10 +2167,9 @@ function simulate(dt) {
       else if (v.alive) updateGroundPlayer(v, dt);
     }
     updateMissiles(dt); updateShells(dt); updateFlak(dt);
-    updateEnemies(dt); if (!NET.on || NET.isHost) updateAABullets(dt); updateSoldiers(dt);
+    updateEnemies(dt); updateAABullets(dt); updateSoldiers(dt);
     updateFinale(dt);
   }
-  netUpdate(dt);
   firePressed = false; interactPressed = false; towPressed = false; mouseDX = mouseDY = 0;
   updateFires(dt);
   for (const src of smokeSources) { src.timer -= dt; if (src.timer <= 0) { src.timer = 0.34; puff(src.pos, rand(3, 5), 0x3a3633, 3.6, 2.6); } }
@@ -2373,7 +2185,7 @@ function tick() { requestAnimationFrame(tick); simulate(Math.min(clock.getDelta(
 if (location.search.includes('debug')) {
   window.__step = (dt, n = 1) => { for (let i = 0; i < n; i++) simulate(dt); };
   window.__keys = keys;
-  window.__game = { THREE, scene, camera, P, G, CFG, NET, SECTORS, SPAWNS, BRIDGES, RIVER, VOLCANO, CITY, vehicles, soldiers, buildings, lifts, barns, ferries, sun, onNet, worldSnapshot, applyWorld, beginBattle,
+  window.__game = { THREE, scene, camera, P, G, CFG, SECTORS, SPAWNS, BRIDGES, RIVER, VOLCANO, CITY, vehicles, soldiers, buildings, lifts, barns, ferries, sun,
                     damageVehicle, spawnGarrison, spawnSoldier, startGame, enterVehicle, exitVehicle, chooseSpawn, terrainHeight, groundAt, overWater, explode, detonate, findInteract, useLift, hookTank, checkFront, startFinale, sectorAlive };
 }
 // idle camera over the middle barn until you deploy
