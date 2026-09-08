@@ -149,7 +149,7 @@
     </section>
 
     <footer>
-      W/S pitch · A/D turn · SHIFT throttle · SPACE fire · F guns · 1-4 weapons · R flares · G gear · C view · E load/drop · P pause<br>
+      W/S pitch · A/D turn · SHIFT throttle · F fire · SPACE guns · 1-3 weapons · R flares · G gear · C view · E load/drop · P pause<br>
       Everything runs offline in the browser. Your callsign is stored on this device only.
     </footer>
   </div>
@@ -183,9 +183,9 @@ $('change').addEventListener('click', () => {
 /* ---------- catalogue ---------- */
 const MODES = [
   { id: 'strike',   kick: 'AIR TO GROUND', name: 'GROUND STRIKE',
-    p: 'Rockets, bombs and guns against SAM sites, armour and depots. They shoot back, and the flak gets thick over the good targets.' },
+    p: 'Missiles, rockets, bombs and guns against AA belts, armour, radar and fuel. The guns hose tracer at anything inside 780 m — go in low and fast, do not circle.' },
   { id: 'dogfight', kick: 'AIR TO AIR', name: 'DOGFIGHT',
-    p: 'Enemy fighters and nothing else. Get the lock, take the shot, and break with flares when one gets behind you.' },
+    p: 'Enemy fighters and nothing else. Put one in your nose, the missile takes it. Guns for the close stuff, flares when one gets behind you.' },
   { id: 'run',      kick: 'FLY IT ACROSS THE LINE', name: 'CONTRABAND RUN',
     p: 'Load at your strip, cross the line low, drop the cargo on the marked zone and get home. Climb near a radar and they scramble on you.' },
 ];
