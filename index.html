@@ -62,6 +62,24 @@
   .sum{font-size:12px;color:var(--dim);line-height:1.7}
   .sum b{color:var(--ink)}
 
+  .ghostbtn{font:inherit;font-size:11px;letter-spacing:.16em;padding:20px 22px;border:1px solid rgba(120,255,190,.28);border-radius:8px;background:transparent;color:var(--dim);cursor:pointer}
+  .ghostbtn:hover{border-color:rgba(255,120,120,.5);color:#ff9b9b}
+  .runcard{background:linear-gradient(140deg,rgba(20,60,48,.78),rgba(10,22,26,.72));border:1px solid rgba(61,220,132,.35);border-radius:11px;padding:22px 24px}
+  .runhead{display:flex;justify-content:space-between;align-items:flex-start;gap:20px;flex-wrap:wrap}
+  .runhead h3{font-size:20px;letter-spacing:.12em}
+  .runhead p{font-size:12px;color:var(--dim);margin-top:6px;max-width:52ch;line-height:1.7}
+  .runmoney{text-align:right}
+  .runmoney span{font-size:28px;font-weight:800;color:var(--warn);display:block}
+  .runmoney small{font-size:9px;letter-spacing:.22em;color:var(--dim)}
+  .lvls{display:grid;grid-template-columns:repeat(auto-fit,minmax(112px,1fr));gap:8px;margin-top:18px}
+  .lv{background:rgba(0,0,0,.28);border:1px solid rgba(120,255,190,.14);border-radius:6px;padding:9px 10px;font-size:10.5px;color:var(--dim);cursor:pointer}
+  .lv b{display:block;font-size:11px;color:#cfeedd;letter-spacing:.1em;margin-bottom:3px}
+  .lv:hover{border-color:rgba(120,255,190,.4)}
+  .lv.done{border-color:rgba(61,220,132,.45);color:#7fd4a8}
+  .lv.done b{color:var(--acc)}
+  .lv.now{border-color:var(--acc);background:rgba(20,52,42,.85)}
+  .lv.lock{opacity:.35;cursor:default}
+  .lv .pay{color:var(--warn)}
   .old{background:transparent;border:1px dashed rgba(120,255,190,.22)}
   .old:hover{border-color:rgba(120,255,190,.45)}
 
@@ -102,18 +120,36 @@
     </header>
     <div class="rule"></div>
 
+    <section id="runSec">
+      <div class="step"><b>01</b> THE RUN &middot; CAMPAIGN</div>
+      <div class="runcard">
+        <div class="runhead">
+          <div>
+            <h3 id="runTitle">LEVEL 1 &middot; FIRST JOB</h3>
+            <p id="runSub">Twelve jobs, six maps, one aeroplane. Fly low, keep the cargo, get home.</p>
+          </div>
+          <div class="runmoney"><span id="runMoney">&euro;0</span><small>IN THE BOX</small></div>
+        </div>
+        <div class="row" style="margin-top:16px">
+          <button class="go" id="runGo">CONTINUE</button>
+          <button class="ghostbtn" id="runWipe">START OVER</button>
+        </div>
+        <div class="lvls" id="lvls"></div>
+      </div>
+    </section>
+
     <section>
-      <div class="step"><b>01</b> PICK THE JOB</div>
+      <div class="step"><b>02</b> FREE FLIGHT &middot; PICK THE JOB</div>
       <div class="grid g3" id="modes"></div>
     </section>
 
     <section>
-      <div class="step"><b>02</b> PICK THE GROUND</div>
+      <div class="step"><b>03</b> PICK THE GROUND</div>
       <div class="grid g6" id="maps"></div>
     </section>
 
     <section>
-      <div class="step"><b>03</b> SET IT UP</div>
+      <div class="step"><b>04</b> SET IT UP</div>
       <div class="opts">
         <div class="seg" id="segRound"><span class="lbl">ROUND</span>
           <button data-v="obj" class="on">CLEAR OBJECTIVES</button><button data-v="time">TIME ATTACK · 5 MIN</button></div>
@@ -186,8 +222,6 @@ const MODES = [
     p: 'One rocket, no lock. It goes exactly where the nose points, so line the aeroplane up. AA guns hose tracer at anything inside 780 m — low and fast, do not circle.' },
   { id: 'dogfight', kick: 'AIR TO AIR', name: 'DOGFIGHT',
     p: 'Enemy fighters and nothing else. Same rocket, no lock — you lead it yourself. Keep an eye on the mirror, they come from behind.' },
-  { id: 'run',      kick: 'FLY IT ACROSS THE LINE', name: 'CONTRABAND RUN',
-    p: 'Load at your strip, cross the line low, drop the cargo on the marked zone and get home. Climb near a radar and they scramble on you.' },
 ];
 const MAPS = [
   { id: 'campaign', name: 'RIVER CROSSING', p: 'The campaign ground from the air. River, bridges, the city, the canyon and the volcano.' },
@@ -197,8 +231,46 @@ const MAPS = [
   { id: 'basin',    name: 'DESERT BASIN',   p: 'Flat, pale, open for miles. Mesas to hide behind and nothing else.' },
   { id: 'fjord',    name: 'ARCTIC FJORD',   p: 'Three flooded canyons in an ice plateau, rigs out in the black water.' },
 ];
+/* ---------- the campaign ---------- */
+const LEVELS = [
+  [1,'FIRST JOB','HOME AIRFIELD',3200],[2,'TWO DROPS','HOME AIRFIELD',4800],
+  [3,'ACROSS THE RIVER','RIVER CROSSING',7000],[4,'NIGHT OVER THE CITY','RIVER CROSSING',10500],
+  [5,'OFF THE BOAT','CORAL ATOLL',13000],[6,'WEATHER COMING IN','CORAL ATOLL',16000],
+  [7,'THE LONG HAUL','DESERT BASIN',19000],[8,'DESERT AT NIGHT','DESERT BASIN',24000],
+  [9,'THROUGH THE VALLEY','ALPINE DAM',28000],[10,'DAM RUN','ALPINE DAM',34000],
+  [11,'BETWEEN THE WALLS','ARCTIC FJORD',40000],[12,'THE LAST RUN','ARCTIC FJORD',60000],
+];
+let RUN = { level: 1, money: 0, cleared: 0, best: {} };
+try { const r = JSON.parse(localStorage.getItem('jetstrike-run') || 'null'); if (r) RUN = Object.assign(RUN, r); } catch (e) {}
+function paintRun() {
+  const cur = LEVELS[Math.min(LEVELS.length, RUN.level) - 1];
+  $('runTitle').innerHTML = 'LEVEL ' + cur[0] + ' &middot; ' + cur[1];
+  $('runSub').textContent = RUN.cleared
+    ? cur[2] + ' · ' + RUN.cleared + ' of 12 jobs done. Every zone is guarded and you cannot drop with a fighter on you — expect to go round more than once.'
+    : 'Twelve jobs, six maps, one aeroplane. Fly low, kill the guns covering the zone, shake anything on your tail, get home and land to cash in.';
+  $('runMoney').innerHTML = '&euro;' + RUN.money.toLocaleString();
+  $('runGo').textContent = RUN.cleared ? 'CONTINUE · LEVEL ' + cur[0] : 'START THE CAMPAIGN';
+  const host = $('lvls'); host.innerHTML = '';
+  for (const [n, name, map, pay] of LEVELS) {
+    const done = n <= RUN.cleared, now = n === RUN.level, locked = n > RUN.level;
+    const d = document.createElement('div');
+    d.className = 'lv' + (done ? ' done' : '') + (now ? ' now' : '') + (locked ? ' lock' : '');
+    d.innerHTML = '<b>' + (done ? '&#10003; ' : '') + n + '. ' + name + '</b>' + map
+      + '<br><span class="pay">' + (RUN.best[n] ? '&euro;' + RUN.best[n].toLocaleString() : '&euro;' + pay.toLocaleString()) + '</span>';
+    if (!locked) d.onclick = () => location.href = 'air.html?mode=run&level=' + n;
+    host.appendChild(d);
+  }
+}
+$('runGo').addEventListener('click', () => location.href = 'air.html?mode=run&level=' + RUN.level);
+$('runWipe').addEventListener('click', () => {
+  if (!confirm('Wipe your progress and money and start at level 1?')) return;
+  RUN = { level: 1, money: 0, cleared: 0, best: {} };
+  try { localStorage.setItem('jetstrike-run', JSON.stringify(RUN)); } catch (e) {}
+  paintRun();
+});
+
 const sel = { mode: 'strike', map: 'campaign', round: 'obj', skill: 'easy', low: '0' };
-try { const s = JSON.parse(localStorage.getItem('jetstrike-sel') || 'null'); if (s) Object.assign(sel, s); if (localStorage.getItem('jetstrike-low') === '1') sel.low = '1'; } catch (e) {}
+try { const s = JSON.parse(localStorage.getItem('jetstrike-sel') || 'null'); if (s) Object.assign(sel, s); if (sel.mode === 'run') sel.mode = 'strike'; if (localStorage.getItem('jetstrike-low') === '1') sel.low = '1'; } catch (e) {}
 
 /* ---------- map thumbnails ---------- */
 function thumb(cv, id) {
@@ -285,6 +357,7 @@ function summary() {
     + (sel.round === 'time' ? 'Five minutes, biggest score wins' : 'Runs until the objectives are clear')
     + ' · ' + (sel.skill === 'easy' ? 'Easy' : 'Normal') + (sel.low === '1' ? ' · low graphics' : '');
 }
+paintRun();
 cards($('modes'), MODES, 'mode', false);
 cards($('maps'), MAPS, 'map', true);
 segs('segRound', 'round'); segs('segSkill', 'skill'); segs('segLow', 'low');
